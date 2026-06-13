@@ -10,8 +10,8 @@ deployment target (Jetson Nano gen1, sm_53, CUDA 10.2).
 |---|---|---|
 | sherpa-onnx (ONNX Runtime) | CPU (CUDA = blocked, see below) | SenseVoice, X-ASR, melo8k, silero-VAD, TEN-VAD |
 | RapidSpeech.cpp (ggml) | **CPU / CUDA / Vulkan** | SenseVoice, melo8k, silero-VAD |
-| sensevoice.cpp (ggml) | CPU / CUDA | SenseVoice |
-| sherpa-ncnn (ncnn) | CPU (Vulkan = blocked) | streaming zipformer |
+| sensevoice.cpp (ggml) | **CPU / CUDA / Vulkan** | SenseVoice |
+| sherpa-ncnn (ncnn) | **CPU / Vulkan** | streaming zipformer |
 
 **Method.** Warm RTF = steady-state in a **persistent context** (model + backend init once, median
 of iters ≥2). This matters enormously: the ggml engines are **launch-bound** — the first
@@ -38,12 +38,24 @@ streaming-ASR models, both sherpa/ncnn-only; not cross-comparable to each other.
 | | CPU | CUDA | Vulkan |
 |---|---|---|---|
 | sherpa-onnx (ONNX int8) | **0.0102** | ⛔ blocked | — |
-| RapidSpeech.cpp (ggml) | 0.0739 | **0.0031** | 0.0031 |
-| sensevoice.cpp (ggml) | 0.044 | 0.0058 | CPU-fallback¹ |
+| RapidSpeech.cpp (ggml) | 0.0739 | **0.0031** | **0.0031** |
+| sensevoice.cpp (ggml) | 0.044 | 0.0058 | **0.0058**¹ |
 
-¹ sensevoice.cpp selects the GPU via the ggml device registry; the GB10's Vulkan device isn't
-picked up there (works for CUDA), so it silently runs CPU. RapidSpeech calls
-`ggml_backend_vk_init` directly and does use Vulkan.
+¹ Needed a fix: sensevoice.cpp's GPU selector only matched `GGML_BACKEND_DEVICE_TYPE_GPU`, but
+ggml reports integrated/UMA GPUs (GB10, Jetson, Apple) as `..._IGPU` → silent CPU fallback.
+Accepting IGPU restores GPU use (PR'd to vieenrose/SenseVoice.cpp#1). On every ggml engine,
+Vulkan == CUDA for warm SenseVoice.
+
+## sherpa-ncnn — streaming zipformer, CPU vs Vulkan
+
+| | CPU | Vulkan |
+|---|---|---|
+| RTF | **0.045** | 0.736 *(16× slower!)* |
+
+ncnn-Vulkan runs on the GB10 but is **16× slower than CPU** for streaming ASR: streaming decodes
+in tiny per-chunk forwards, and GPU per-dispatch overhead + Vulkan pipeline compilation swamp the
+sub-millisecond compute. The clearest demonstration of the "GPU only helps big batched work"
+boundary in this whole benchmark.
 
 ## Accuracy
 
@@ -71,6 +83,6 @@ picked up there (works for CUDA), so it silently runs CPU. RapidSpeech calls
 ## Blockers (see `BLOCKERS.md`)
 - **sherpa-onnx CUDA:** no prebuilt path on GB10/CUDA-13; from-source onnxruntime build (CUDA-13
   CUTLASS/cccl fixes applied) — the CUDA provider was still compiling when this was written.
-- **sherpa-ncnn Vulkan:** needs ncnn built with glslang; the glslang dev toolchain wasn't
-  installable in the no-sudo sandbox.
-- **sensevoice.cpp Vulkan:** device-registry selection doesn't pick the Vulkan GB10 (CPU fallback).
+- **sherpa-ncnn Vulkan:** UNBLOCKED — cloned ncnn's `nihui/glslang` fork into the FetchContent
+  tree + a CLI env toggle. Runs, but 16× slower than CPU (streaming).
+- **sensevoice.cpp Vulkan:** UNBLOCKED — the IGPU device-select fix (above).
