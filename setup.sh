@@ -8,7 +8,7 @@ cd "$ROOT"
 python3 -m venv .venv && . .venv/bin/activate
 pip install -q --upgrade pip
 pip install -q huggingface_hub soundfile librosa jiwer matplotlib onnx gguf \
-               sherpa-onnx sherpa-ncnn
+               sherpa-onnx
 
 echo "== models =="
 mkdir -p models/sherpa models/rapidspeech
@@ -17,15 +17,12 @@ mkdir -p models/sherpa models/rapidspeech
   curl -sL https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2 | tar xj
   curl -sL -o silero_vad.onnx https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
   curl -sL -o ten-vad.onnx   https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/ten-vad.onnx )
-# melo8k (sherpa ONNX) + RapidSpeech/sensevoice.cpp gguf
+# melo8k (sherpa ONNX) + RapidSpeech gguf
 hf download Luigi/vits-melo-tts-zh_en-8k --local-dir models/sherpa/melo8k
 hf download RapidAI/RapidSpeech ASR/SenseVoice/sense-voice-small-q5_k.gguf ASR/silero_vad_v6.gguf --local-dir models/rapidspeech
 hf download Luigi/openvoice2-melo8k-zh-gguf openvoice2-melo8k-zh.gguf --local-dir models/rapidspeech
-hf download lovemefan/sense-voice-gguf sense-voice-small-q5_k.gguf --local-dir models/sensevoicecpp
 # X-ASR streaming zipformer (quantize encoder+joiner to int8 in bench)
 hf download GilgameshWind/X-ASR-zh-en "deployment/models/chunk-480ms-model/*" --local-dir models/xasr
-# sherpa-ncnn streaming zipformer
-hf download csukuangfj/sherpa-ncnn-streaming-zipformer-bilingual-zh-en-2023-02-13 --local-dir models/ncnn-zipformer
 
 echo "== test audio =="
 mkdir -p audio && ( cd audio && git clone --depth 1 --filter=blob:none --sparse https://github.com/TEN-framework/ten-vad.git && cd ten-vad && git sparse-checkout set testset )

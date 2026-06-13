@@ -7,8 +7,6 @@ aarch64, sm_121, CUDA 13, 128 GB unified memory). Compares, on the same models a
 |---|---|---|
 | **sherpa-onnx** | ONNX Runtime (CPU; CUDA via from-source ORT) | SenseVoice, X-ASR, melo8k, silero-VAD, TEN-VAD |
 | **RapidSpeech.cpp** | ggml (CPU / CUDA / Vulkan) | SenseVoice, melo8k, silero-VAD |
-| **sensevoice.cpp** | ggml (CPU / CUDA) | SenseVoice |
-| **sherpa-ncnn** | ncnn (CPU / Vulkan) | streaming zipformer ASR |
 
 > This is the **GPU half** of an existing CPU benchmark. On CPU, sherpa-onnx wins; RapidSpeech's
 > thesis is the ggml CUDA backend — this measures whether GPU flips the verdict. See
@@ -16,11 +14,11 @@ aarch64, sm_121, CUDA 13, 128 GB unified memory). Compares, on the same models a
 
 ## Headline results (warm RTF, lower is better)
 
-| Model | sherpa CPU | RapidSpeech CPU | RapidSpeech CUDA | sensevoice.cpp CUDA |
+| Model | sherpa CPU | RapidSpeech CPU | RapidSpeech CUDA | RapidSpeech Vulkan |
 |---|---|---|---|---|
-| SenseVoice STT | 0.0102 | 0.0739 | **0.0031** | 0.0058 (fixed) |
-| melo8k TTS | 0.0209 | 0.0657 | **0.0107** | — |
-| silero-VAD | **0.0023** | 0.0055 | 0.0057 | — |
+| SenseVoice STT | 0.0102 | 0.0739 | **0.0031** | 0.0031 |
+| melo8k TTS | 0.0209 | 0.0657 | **0.0107** | 0.0245 |
+| silero-VAD | **0.0023** | 0.0055 | 0.0057 | 0.0413 |
 
 - **CPU:** sherpa-onnx wins (6–7× on STT/TTS).
 - **GPU:** RapidSpeech's ggml-CUDA flips both STT (0.0031) and TTS (0.0107) ahead of sherpa-CPU —
@@ -30,9 +28,8 @@ aarch64, sm_121, CUDA 13, 128 GB unified memory). Compares, on the same models a
 ## Fixes produced along the way
 - **RapidSpeech.cpp melo8k**: implemented the missing Vocos8k vocoder + CUDA im2col fix
   (validated bit-exact vs ONNX). The fix already lives on the author's `jetson-nano-gen1` branch.
-- **sensevoice.cpp**: GPU was *slower* than CPU on its shipped (old) ggml; bumped to modern ggml
-  + `ggml_cont` fix → **8.8× GPU speedup**
-  ([vieenrose/SenseVoice.cpp#1](https://github.com/vieenrose/SenseVoice.cpp/pull/1)).
+- **ggml-Vulkan on the GB10**: built RapidSpeech.cpp against modern ggml's Vulkan backend after
+  fetching a newer `glslc` (Ubuntu 24.04's is too old for modern ggml shaders).
 
 ## Reproduce
 ```bash

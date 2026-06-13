@@ -4,12 +4,7 @@ SenseVoice,sherpa-onnx,cuda,,,"BLOCKED: ORT-from-source CUDA provider still comp
 SenseVoice,rapidspeech,cpu,0.0744,0.0739,ggml q5_k
 SenseVoice,rapidspeech,cuda,0.0095,0.0031,ggml-CUDA
 SenseVoice,rapidspeech,vulkan,0.1780,0.0031,ggml-Vulkan (= CUDA warm)
-SenseVoice,sensevoice.cpp,cpu,0.0461,0.0440,ggml q5_k (modern-ggml fix)
-SenseVoice,sensevoice.cpp,cuda,0.0105,0.0058,ggml-CUDA (after fix; was 0.051 on old ggml)
-SenseVoice,sensevoice.cpp,vulkan,0.029,0.0058,"ggml-Vulkan after IGPU device-select fix (= CUDA warm)"
 X-ASR-480ms-int8,sherpa-onnx,cpu,0.0666,0.0666,streaming zipformer (sherpa-only)
-streaming-zipformer,sherpa-ncnn,cpu,0.0537,0.0535,ncnn (different model; bilingual zh-en)
-streaming-zipformer,sherpa-ncnn,vulkan,,0.736,"ncnn-Vulkan: 16x SLOWER than CPU (streaming = tiny chunks, GPU dispatch overhead)"
 melo8k,sherpa-onnx,cpu,0.0196,0.0209,VITS ONNX
 melo8k,rapidspeech,cpu,0.0802,0.0657,ggml
 melo8k,rapidspeech,cuda,0.1101,0.0107,ggml-CUDA

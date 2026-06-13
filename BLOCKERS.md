@@ -33,16 +33,11 @@ encoder+joiner to int8 (`onnxruntime.quantization.quantize_dynamic`, QInt8) to m
 deployment; decoder kept fp32 (embedding-based). It is a **zh-en** model — ja/ko inputs are
 out-of-domain.
 
-## 5. Vulkan backends — RESOLVED (all three now run on the GB10)
+## 5. ggml-Vulkan on the GB10 — RESOLVED
 - **ggml-Vulkan (RapidSpeech):** builds & runs on the GB10, but Ubuntu 24.04's `glslc` (shaderc
   2023.8) is too old for modern ggml's shaders (empty `.cpp` → undefined `*_data` symbols at
   link). Fixed by fetching `glslc`/`libshaderc` **2026.2** from a newer Ubuntu pool
   (`apt download` + `dpkg -x`, no sudo) + SPIRV-Headers + libvulkan-dev. Then it works:
   RapidSpeech-Vulkan = CUDA on SenseVoice, ~2.3× behind CUDA on melo8k, worse than CPU on VAD.
-- **sensevoice.cpp Vulkan:** FIXED — its GPU selector only matched `..._TYPE_GPU`; ggml reports
-  UMA/integrated GPUs as `..._TYPE_IGPU`. Accepting IGPU → Vulkan warm 0.0058 (= CUDA). PR #1.
-- **sherpa-ncnn Vulkan:** FIXED — ncnn's FetchContent tree lacked its `nihui/glslang` submodule;
-  cloned it in manually + a CLI env toggle for `use_vulkan_compute`. Runs on GB10 but 16× slower
-  than CPU (streaming ASR = tiny per-chunk forwards, GPU dispatch-bound).
 
 GPU memory is `N/A` for Vulkan too (GB10 UMA).
