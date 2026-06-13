@@ -1,0 +1,16 @@
+model,framework,device,rtf_cold,rtf_warm,gpu_mem_mb,note
+SenseVoice,sherpa-onnx,cpu,0.0115,0.0102,N/A,whole-clip in-process warm
+SenseVoice,rapidspeech,cpu,0.0744,0.0739,N/A,whole-clip in-process
+SenseVoice,rapidspeech,cuda,0.0095,0.0031,N/A,whole-clip; cold pays graph warmup
+SenseVoice,sensevoice.cpp-oldggml,cpu,0.0458,0.0440,N/A,shipped
+SenseVoice,sensevoice.cpp-oldggml,cuda,0.0552,0.0510,N/A,"shipped; GPU SLOWER than CPU (old ggml starves GB10)"
+SenseVoice,sensevoice.cpp-fixed,cpu,0.0461,0.0440,N/A,modern ggml
+SenseVoice,sensevoice.cpp-fixed,cuda,0.0105,0.0058,N/A,"modern ggml + cont fix; 8.8x faster than shipped GPU"
+X-ASR-480ms-int8,sherpa-onnx,cpu,0.0666,0.0666,N/A,streaming zipformer (sherpa-only)
+melo8k,sherpa-onnx,cpu,0.0196,0.0209,N/A,
+melo8k,rapidspeech,cpu,0.0802,0.0657,N/A,in-process warm
+melo8k,rapidspeech,cuda,0.1101,0.0107,N/A,"in-process warm; cold pays ~220ms graph warmup"
+silero-VAD,sherpa-onnx,cpu,0.0024,0.0023,N/A,
+silero-VAD,rapidspeech,cpu,0.0059,0.0055,N/A,init-once
+silero-VAD,rapidspeech,cuda,0.0078,0.0057,N/A,"GPU-neutral (model too small)"
+TEN-VAD,sherpa-onnx,cpu,0.0030,0.0029,N/A,sherpa-only

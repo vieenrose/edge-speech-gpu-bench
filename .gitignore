@@ -1,0 +1,17 @@
+# Large / regenerable artifacts — fetched or built by setup.sh
+models/
+third_party/
+.venv/
+build-*/
+__pycache__/
+*.pyc
+
+# build logs (keep build/*.md docs)
+build/*.log
+
+# audio: keep the small RTF clip; exclude the cloned TEN-VAD testset repo
+audio/ten-vad/
+
+# scratch
+*.wav.tmp
+/tmp/

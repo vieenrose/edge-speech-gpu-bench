@@ -1,0 +1,5 @@
+framework,device,rtf_cold,rtf_warm,rtf_overall,mem_mb
+RapidSpeech-ggml,cuda,0.0400,0.0060,0.0110,-1
+RapidSpeech-ggml,cpu,0.0710,0.0700,0.0630,0
+sherpa-onnx,cpu,0.0120,0.0105,0.0105,0
+sherpa-onnx,cuda,0.0116,0.0103,0.0103,-1
