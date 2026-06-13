@@ -1,16 +1,21 @@
-model,framework,device,rtf_cold,rtf_warm,gpu_mem_mb,note
-SenseVoice,sherpa-onnx,cpu,0.0115,0.0102,N/A,whole-clip in-process warm
-SenseVoice,rapidspeech,cpu,0.0744,0.0739,N/A,whole-clip in-process
-SenseVoice,rapidspeech,cuda,0.0095,0.0031,N/A,whole-clip; cold pays graph warmup
-SenseVoice,sensevoice.cpp-oldggml,cpu,0.0458,0.0440,N/A,shipped
-SenseVoice,sensevoice.cpp-oldggml,cuda,0.0552,0.0510,N/A,"shipped; GPU SLOWER than CPU (old ggml starves GB10)"
-SenseVoice,sensevoice.cpp-fixed,cpu,0.0461,0.0440,N/A,modern ggml
-SenseVoice,sensevoice.cpp-fixed,cuda,0.0105,0.0058,N/A,"modern ggml + cont fix; 8.8x faster than shipped GPU"
-X-ASR-480ms-int8,sherpa-onnx,cpu,0.0666,0.0666,N/A,streaming zipformer (sherpa-only)
-melo8k,sherpa-onnx,cpu,0.0196,0.0209,N/A,
-melo8k,rapidspeech,cpu,0.0802,0.0657,N/A,in-process warm
-melo8k,rapidspeech,cuda,0.1101,0.0107,N/A,"in-process warm; cold pays ~220ms graph warmup"
-silero-VAD,sherpa-onnx,cpu,0.0024,0.0023,N/A,
-silero-VAD,rapidspeech,cpu,0.0059,0.0055,N/A,init-once
-silero-VAD,rapidspeech,cuda,0.0078,0.0057,N/A,"GPU-neutral (model too small)"
-TEN-VAD,sherpa-onnx,cpu,0.0030,0.0029,N/A,sherpa-only
+model,framework,backend,rtf_cold,rtf_warm,note
+SenseVoice,sherpa-onnx,cpu,0.0115,0.0102,ONNX int8 whole-clip in-process
+SenseVoice,sherpa-onnx,cuda,,,"BLOCKED: ORT-from-source CUDA provider still compiling"
+SenseVoice,rapidspeech,cpu,0.0744,0.0739,ggml q5_k
+SenseVoice,rapidspeech,cuda,0.0095,0.0031,ggml-CUDA
+SenseVoice,rapidspeech,vulkan,0.1780,0.0031,ggml-Vulkan (= CUDA warm)
+SenseVoice,sensevoice.cpp,cpu,0.0461,0.0440,ggml q5_k (modern-ggml fix)
+SenseVoice,sensevoice.cpp,cuda,0.0105,0.0058,ggml-CUDA (after fix; was 0.051 on old ggml)
+SenseVoice,sensevoice.cpp,vulkan,,,"falls back to CPU (registry device not selected)"
+X-ASR-480ms-int8,sherpa-onnx,cpu,0.0666,0.0666,streaming zipformer (sherpa-only)
+streaming-zipformer,sherpa-ncnn,cpu,0.0537,0.0535,ncnn (different model; bilingual zh-en)
+streaming-zipformer,sherpa-ncnn,vulkan,,,"BLOCKED: ncnn-Vulkan needs glslang build (no-sudo sandbox)"
+melo8k,sherpa-onnx,cpu,0.0196,0.0209,VITS ONNX
+melo8k,rapidspeech,cpu,0.0802,0.0657,ggml
+melo8k,rapidspeech,cuda,0.1101,0.0107,ggml-CUDA
+melo8k,rapidspeech,vulkan,0.7818,0.0245,ggml-Vulkan
+silero-VAD,sherpa-onnx,cpu,0.0024,0.0023,ONNX
+silero-VAD,rapidspeech,cpu,0.0059,0.0055,ggml
+silero-VAD,rapidspeech,cuda,0.0078,0.0057,ggml-CUDA (GPU-neutral)
+silero-VAD,rapidspeech,vulkan,0.0591,0.0413,ggml-Vulkan (slower than CPU; tiny model)
+TEN-VAD,sherpa-onnx,cpu,0.0030,0.0029,ONNX (sherpa-only)

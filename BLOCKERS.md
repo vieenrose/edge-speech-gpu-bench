@@ -32,3 +32,17 @@ ggml tree; building it on modern ggml/CUDA-13 needs the `RS_GGML_HAS_SET_ROWS` c
 encoder+joiner to int8 (`onnxruntime.quantization.quantize_dynamic`, QInt8) to match the int8
 deployment; decoder kept fp32 (embedding-based). It is a **zh-en** model — ja/ko inputs are
 out-of-domain.
+
+## 5. Vulkan backends — toolchain friction on aarch64 / no-sudo
+- **ggml-Vulkan (RapidSpeech):** builds & runs on the GB10, but Ubuntu 24.04's `glslc` (shaderc
+  2023.8) is too old for modern ggml's shaders (empty `.cpp` → undefined `*_data` symbols at
+  link). Fixed by fetching `glslc`/`libshaderc` **2026.2** from a newer Ubuntu pool
+  (`apt download` + `dpkg -x`, no sudo) + SPIRV-Headers + libvulkan-dev. Then it works:
+  RapidSpeech-Vulkan = CUDA on SenseVoice, ~2.3× behind CUDA on melo8k, worse than CPU on VAD.
+- **sensevoice.cpp Vulkan:** compiles, but its ggml-device-registry GPU selector doesn't pick the
+  GB10 Vulkan device (works for CUDA) → silent CPU fallback.
+- **sherpa-ncnn Vulkan:** needs ncnn built with glslang; ncnn's FetchContent copy lacks its
+  glslang submodule and the system-glslang dev packages weren't installable in the no-sudo
+  sandbox. sherpa-ncnn **CPU** (pip) works (streaming zipformer warm RTF 0.0535).
+
+GPU memory is `N/A` for Vulkan too (GB10 UMA).
