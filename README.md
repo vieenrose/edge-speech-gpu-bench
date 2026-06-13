@@ -58,6 +58,7 @@ shipped to [`vieenrose/RapidSpeech.cpp@jetson-nano-gen1`](https://github.com/vie
 on `CUDA0`). **Speed pending the real device.** See
 [`docs/gen1-cuda-validation.md`](docs/gen1-cuda-validation.md) +
 [`docs/jetson-nano-gen1-feasibility.md`](docs/jetson-nano-gen1-feasibility.md).
+TensorRT 8.2.1 path analyzed too — see [`docs/tensorrt-jetson-nano-gen1.md`](docs/tensorrt-jetson-nano-gen1.md) (it doesn't escape cuDNN's 782 MB by default).
 
 ## Hardware / notes
 - GB10 reports `N/A` for `nvidia-smi` GPU memory (unified memory).
