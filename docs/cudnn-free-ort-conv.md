@@ -7,8 +7,10 @@ of **onnxruntime's CUDA EP**, not of sherpa-onnx itself.
 
 ## What was done (PoC — validated)
 
-`patches/onnxruntime-cudnn-free-conv.patch` (against onnxruntime `v1.23.1`) replaces
-`cudnnConvolutionForward` for the `Conv` op with **im2col + cuBLAS GEMM**:
+Lives as a fork branch: **[`vieenrose/onnxruntime@cudnn-free-cuda-conv-jetson`](https://github.com/vieenrose/onnxruntime/tree/cudnn-free-cuda-conv-jetson)**
+(off onnxruntime `v1.23.1`, commit `af7c2c8`). The same diff is mirrored here as
+`patches/onnxruntime-cudnn-free-conv.patch`. It replaces `cudnnConvolutionForward`
+for the `Conv` op with **im2col + cuBLAS GEMM**:
 
 - **`conv_nocudnn.cu`** — a Caffe-style CUDA **im2col** kernel (NCHW) + a bias-add kernel,
   float/half/double launchers.
