@@ -38,7 +38,33 @@ through the rebuilt ORT, CUDA EP (cuDNN-free conv) vs CPU EP reference, same inp
 Matches the reference to **float epsilon (~1e-6)** — the cuDNN-free conv is numerically correct
 across every conv variant SenseVoice / melo8k / silero use.
 
-## What remains for the full RAM win (Phase 2)
+## Skipping cuDNN init (Phase 2 start) — and the measured RAM mechanism
+
+`cudnnCreate` is called at CUDA-EP init (`cuda_stream_handle.cc`, `cuda_execution_provider.cc`)
+**regardless of which ops run** — that handle creation alone faults cuDNN into RAM. Added
+`-DORT_CUDA_NO_CUDNN` to skip it (keeping cuBLAS, unlike ORT's `USE_CUDA_MINIMAL` which drops
+cuBLAS too). conv_test still passes with the handle skipped.
+
+A microbenchmark (`patches/cudnn_ram_microbench.cu`) measures libcudnn resident pages directly
+(cuDNN 9 on the GB10 host):
+
+```
+start:               libcudnn RSS =    200 KB   (mapped, unused)
+after cuBLAS GEMM:    libcudnn RSS =    200 KB   <- cuDNN-free conv path: cuDNN NOT loaded
+after cudnnCreate:    libcudnn RSS = 49,356 KB   <- handle init alone faults in 49 MB
+after cuDNN conv fwd: libcudnn RSS = 130,200 KB  <- stock ORT Conv faults in 130 MB
+```
+
+So the cuBLAS-only path keeps cuDNN at **~0 (200 KB)**, while a single stock cuDNN conv faults
+in **130 MB here** — and on the Nano's cuDNN 8 it's the **395 MB conv lib (~782 MB total)**.
+Skipping `cudnnCreate` + the cuDNN-free Conv is exactly what avoids it. (Absolute *total* RSS on
+the GB10 is dominated by the ~1 GB CUDA-13 context, which masks this in a gross RSS number — hence
+the per-library measurement; on the Nano's small CUDA-10.2 context the cuDNN delta dominates.)
+
+Fork: **[`vieenrose/onnxruntime@cudnn-free-cuda-conv-jetson`](https://github.com/vieenrose/onnxruntime/tree/cudnn-free-cuda-conv-jetson)**
+(commit `885c0ad`); mirror `patches/onnxruntime-cudnn-free-cuda.patch`.
+
+## What remains for the full RAM win (Phase 2 cont.)
 
 The PoC proves convolution works without cuDNN. To actually **drop cuDNN from the binary** (the
 ~782 MB saving), the CUDA EP's other cuDNN ops used by these models must also go cuDNN-free, then
