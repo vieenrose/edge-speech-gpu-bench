@@ -47,6 +47,18 @@ build/            rapidspeech.md, sherpa.md — exact build commands + CUDA-13 f
 BLOCKERS.md       sherpa-onnx-CUDA build journey, GB10 unified-memory notes, X-ASR int8 notes
 ```
 
+## Deployment-target deliverable: RapidSpeech.cpp CUDA on Jetson Nano gen1
+The real target is the **Jetson Nano gen1** (sm_53, CUDA 10.2), not this GB10 box.
+The CUDA backend is now fixed to build *and run* there — the key bug was ggml's
+batched cuBLAS matmul requesting tensor-op GEMM, which sm_53 Maxwell can't do (no
+tensor cores → `CUBLAS_STATUS_NOT_SUPPORTED`). Fix + full CUDA-10.2 build patch set
+shipped to [`vieenrose/RapidSpeech.cpp@jetson-nano-gen1`](https://github.com/vieenrose/RapidSpeech.cpp/tree/jetson-nano-gen1)
+(commit `7e802ce`); validated for **correctness** in a JetPack-4.6.1 container
+(SenseVoice transcribes correctly, melo8k GPU==CPU corr 0.999999, whole model runs
+on `CUDA0`). **Speed pending the real device.** See
+[`docs/gen1-cuda-validation.md`](docs/gen1-cuda-validation.md) +
+[`docs/jetson-nano-gen1-feasibility.md`](docs/jetson-nano-gen1-feasibility.md).
+
 ## Hardware / notes
 - GB10 reports `N/A` for `nvidia-smi` GPU memory (unified memory).
 - sherpa-onnx CUDA on this box needs a from-source onnxruntime (CUDA-13 / sm_121); see
