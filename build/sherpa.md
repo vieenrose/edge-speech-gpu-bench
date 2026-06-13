@@ -37,6 +37,17 @@ cd onnxruntime  # v1.23.1
   `/usr/local/cuda-13.0/targets/sbsa-linux/include/cccl/`. Add it to the CUDA flags:
   `cmake -DCMAKE_CUDA_FLAGS="-I/usr/local/cuda-13.0/targets/sbsa-linux/include/cccl" .` then resume.
 - `nvcc fatal: Unknown option '-Wstrict-aliasing'` appears as a non-fatal CMake probe.
+- **The CUDA EP has host `.cc` files** (e.g. `contrib_ops/cuda/bert/multihead_attention.cc`) that
+  include CUTLASS and use `longlong4` — so the two fixes above must ALSO be on the **host
+  `CXX_FLAGS`**, not just the nvcc CUDA flags. Append to
+  `CMakeFiles/onnxruntime_providers_cuda.dir/flags.make` `CXX_FLAGS` (or `CMAKE_CXX_FLAGS`):
+  `-Wno-error=deprecated-declarations -I/usr/local/cuda-13.0/targets/sbsa-linux/include/cccl`.
+  (`longlong4` is deprecated in CUDA 13 → `longlong4_16a`; the bare trailing `-Werror` on the host
+  flags otherwise turns it fatal.) With these, `libonnxruntime_providers_cuda.so` (98 MB, sm_121
+  SASS) links cleanly.
+
+**Status:** ORT + CUDA EP build succeeds. The remaining sherpa-onnx-GPU wheel against this local
+ORT is not built (see `BLOCKERS.md` §1) — sherpa-onnx's GPU cmake only knows prebuilt ORT ≤1.18.1.
 
 Status of this build + the sherpa-onnx-GPU link against it: see `results/BENCHMARK.md`
 (sherpa-CUDA column) and `BLOCKERS.md`.

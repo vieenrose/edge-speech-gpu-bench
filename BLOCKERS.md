@@ -9,13 +9,22 @@ On this box, every prebuilt route to sherpa-onnx-CUDA fails:
 - sherpa-onnx's prebuilt aarch64-GPU ORT only goes to v1.18.1 / CUDA 12.
 
 → Mitigation: build onnxruntime 1.23.1 from source for CUDA 13 + sm_121 (see `build/sherpa.md`).
-Required CUDA-13 fix: add `-I/usr/local/cuda-13.0/targets/sbsa-linux/include/cccl` to the CUDA
-flags (CUDA 13 relocated libcu++; CUTLASS's `<cuda/std/utility>` is otherwise not found), and
-disable flash-/memory-efficient-attention. **Current status of this build + the sherpa-onnx GPU
-link against it is recorded in `results/BENCHMARK.md` (sherpa-CUDA column).** This is a heavy,
-multi-stage build (ORT → repackage → sherpa-onnx-GPU), exactly the kind of friction that makes
-sherpa-onnx-CUDA impractical on the actual Jetson Nano gen1 deployment target (sm_53, CUDA 10.2,
-RAM-constrained) — which is why it's banned there.
+**Status: the ORT build now SUCCEEDS** — `libonnxruntime_providers_cuda.so` (98 MB) links with
+native sm_121 SASS (so it avoids the `cudaErrorUnsupportedPtxVersion` that kills the pip nightly)
+and pulls in CUDA-13 cublas/cudart + cuDNN 9. The required CUDA-13 fixes had to be applied to
+**both** the nvcc *and* the host `CXX_FLAGS` — the CUDA EP has host `.cc` files that include
+CUTLASS / use `longlong4`, and the fixes were initially only on the nvcc flags:
+- `-I/usr/local/cuda-13.0/targets/sbsa-linux/include/cccl` (CUDA 13 relocated libcu++;
+  CUTLASS's `<cuda/std/utility>` is otherwise not found),
+- `-Wno-error=deprecated-declarations` (`longlong4` deprecated in CUDA 13 → `longlong4_16a`),
+- disable flash-/memory-efficient-attention.
+
+**Remaining step (not done):** a GPU-enabled sherpa-onnx (C++ + Python wheel) built against this
+local ORT — sherpa-onnx's `onnxruntime-linux-aarch64-gpu.cmake` only knows prebuilt ORT ≤1.18.1,
+so it needs a local-tarball + hash-bypass hook. This whole chain (ORT → repackage → sherpa-onnx-GPU
+wheel) is exactly the friction that makes sherpa-onnx-CUDA impractical on the actual Jetson Nano
+gen1 deployment target (sm_53, CUDA 10.2, RAM-constrained) — which is why it's banned there. The
+sherpa-CUDA column in `results/BENCHMARK.md` therefore stays empty pending that wheel build.
 
 ## 2. GPU memory not reportable
 `nvidia-smi --query-gpu=memory.used,memory.total` returns `[N/A]` on the GB10 (Grace-Blackwell
