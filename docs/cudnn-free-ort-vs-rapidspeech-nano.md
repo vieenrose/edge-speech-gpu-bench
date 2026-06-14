@@ -55,13 +55,14 @@ model to run cuDNN-free was whack-a-mole, each op routed/replaced under `-Donnxr
 - Both walls were cleared: **melo8k** runs via opset-16 LayerNorm decomposition; **TEN-VAD** runs
   after handling TF-SAME/asymmetric conv padding. But the per-op whack-a-mole (Conv/ConvTranspose/Pool/
   Reduce/RNN/FusedConv all needed work) shows how deeply cuDNN-coupled ORT's CUDA EP is.
-- **On RAM, ggml/RapidSpeech wins clearly**: SenseVoice **761 MB** vs ORT **1445 MB** on the same box
+- **On RAM, ggml/RapidSpeech wins clearly**: SenseVoice **761 MB** vs ORT **1215 MB** on the same box
   — even cuDNN-free, ORT's framework/arena overhead roughly doubles ggml's footprint.
 - **RapidSpeech runs all three of its models** (SenseVoice/silero/melo8k) at ~0.76 GB, with **no opset
   ceiling and no per-op cuDNN surgery**.
 
-**Bottom line:** the cuDNN-free ORT 1.11 fork is a viable, now-working technique (the overflow was a
-harness bug), but for the Nano gen1 it's lower-RAM-efficient and higher-friction than RapidSpeech —
-opset ceiling (melo8k), residual cuDNN ops (TEN-VAD), and ~2× the RAM. **RapidSpeech remains the
-better cuDNN-free Nano engine**; the ORT fork is the right choice only when you specifically need
-ORT's ecosystem and your models are opset-16-clean.
+**Bottom line:** the cuDNN-free ORT 1.11 fork now runs **all 5 models** (melo8k via opset-16 LayerNorm
+decomposition, TEN-VAD via TF-SAME pad handling). But for the Nano gen1 it remains **higher-friction**
+(per-op cuDNN surgery across Conv/ConvTranspose/Pool/Reduce/RNN/FusedConv + opset management) and uses
+**~2× the RAM of RapidSpeech** (SenseVoice 1215 MB vs 761 MB; both GB10-context-inflated). **RapidSpeech
+remains the leaner, lower-friction cuDNN-free Nano engine**; the ORT fork is the right choice when you
+specifically need ORT's ecosystem and feature set.
