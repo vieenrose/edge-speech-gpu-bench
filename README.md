@@ -14,16 +14,24 @@ aarch64, sm_121, CUDA 13, 128 GB unified memory). Compares, on the same models a
 
 ## Headline results (warm RTF, lower is better)
 
-| Model | sherpa CPU | RapidSpeech CPU | RapidSpeech CUDA | RapidSpeech Vulkan |
-|---|---|---|---|---|
-| SenseVoice STT | 0.0102 | 0.0739 | **0.0031** | 0.0031 |
-| melo8k TTS | 0.0209 | 0.0657 | **0.0107** | 0.0245 |
-| silero-VAD | **0.0023** | 0.0055 | 0.0057 | 0.0413 |
+| Model | sherpa CPU | sherpa CUDA (cuDNN-free)† | RapidSpeech CPU | RapidSpeech CUDA | RapidSpeech Vulkan |
+|---|---|---|---|---|---|
+| SenseVoice STT | 0.0102 | 0.079 † | 0.0739 | **0.0031** | 0.0031 |
+| melo8k TTS | 0.0209 | 0.028 † | 0.0657 | **0.0107** | 0.0245 |
+| silero-VAD | **0.0023** | — | 0.0055 | 0.0057 | 0.0413 |
 
 - **CPU:** sherpa-onnx wins (6–7× on STT/TTS).
-- **GPU:** RapidSpeech's ggml-CUDA flips both STT (0.0031) and TTS (0.0107) ahead of sherpa-CPU —
-  but it's **launch-bound** (huge first-graph warmup), so it only pays off in a persistent
-  process. See [`results/BENCHMARK.md`](results/BENCHMARK.md).
+- **GPU (GB10-native columns):** RapidSpeech's ggml-CUDA flips both STT (0.0031) and TTS (0.0107)
+  ahead of sherpa-CPU — but it's **launch-bound** (huge first-graph warmup), so it only pays off in a
+  persistent process. See [`results/BENCHMARK.md`](results/BENCHMARK.md).
+- **† sherpa CUDA (cuDNN-free)** is the *new* path this project enabled: sherpa-onnx running
+  end-to-end on the **cuDNN-free onnxruntime 1.11 CUDA EP** (so the Nano can use the GPU without
+  cuDNN's 782 MB). These two figures are measured in the **CUDA-10.2 container with sm_53 PTX-JIT**
+  (the Nano toolchain) — a *different context* from the GB10-native columns, so they're relative-only,
+  not a like-for-like RTF. Warm (JIT+load excluded); validated end-to-end (melo8k round-trips back to
+  the input sentence). Notably, even cuDNN-free GPU here does **not** beat sherpa-CPU on these small
+  models — consistent with the open "does GPU even help on the Nano" question. (silero-VAD not run via
+  sherpa's cuDNN-free path; its raw-graph cost is in the deliverable #2 section.)
 
 ## Fixes produced along the way
 - **RapidSpeech.cpp melo8k**: implemented the missing Vocos8k vocoder + CUDA im2col fix
@@ -71,20 +79,28 @@ melo8k (opset-16), TEN-VAD, X-ASR. Shipped to **[vieenrose/onnxruntime](https://
 - [`cudnn-free-cuda-jetson-nano-gen1`](https://github.com/vieenrose/onnxruntime/tree/cudnn-free-cuda-jetson-nano-gen1) — ORT 1.11.0, the **deployable Nano build** (CUDA 10.2; last ORT to support it).
 - [`cudnn-free-cuda-ep`](https://github.com/vieenrose/onnxruntime/tree/cudnn-free-cuda-ep) — ORT 1.23.1, modern-CUDA **reference** (does *not* run on the Nano — needs CUDA 12/13).
 
+And **sherpa-onnx itself** now builds + runs end-to-end on that cuDNN-free EP (one source tweak for the
+ORT-1.11 API + a build recipe): **[vieenrose/sherpa-onnx@`cudnn-free-ort-1.11-jetson-nano`](https://github.com/vieenrose/sherpa-onnx/tree/cudnn-free-ort-1.11-jetson-nano)**.
+Run with `--provider=cuda:cfg.txt` where `cfg.txt` has `GraphOptimizationLevel=1` (disables the
+cuDNN-only FusedConv).
+
 ### Head-to-head: cuDNN-free ORT vs RapidSpeech (both on the Nano toolchain)
 Both engines cuDNN-free, in the CUDA-10.2 container with sm_53 dispatch. Warm = model-load **and**
-one-time PTX-JIT excluded; inputs matched.
+one-time PTX-JIT excluded; inputs matched. "sherpa-onnx" = the full pipeline (frontend + ORT GPU
+forward); "raw ORT graph" = the bare ONNX forward (my `ort_bench`/`melo_synth`).
 
-| Model | RapidSpeech (ggml): RSS / warm | cuDNN-free ORT 1.11: RSS / warm |
-|---|---|---|
-| SenseVoice (~100 enc frames) | **756 MB** / 501 ms | 1224 MB / **376 ms** |
-| melo8k (*same* 2.21 s utterance) | **572 MB** / 268 ms | 721 MB / **54 ms** |
+| Model | RapidSpeech (ggml) | sherpa-onnx end-to-end (cuDNN-free ORT) | raw ORT graph |
+|---|---|---|---|
+| SenseVoice | **756 MB** / 501 ms | 1227 MB / 443 ms | 1224 MB / 376 ms |
+| melo8k (*same* utterance) | **572 MB** / 268 ms | 736 MB / **55 ms** | 721 MB / 54 ms |
 
 - **RAM:** RapidSpeech is **~2× lighter** (ggml vs ORT's arena+framework overhead).
-- **Warm speed:** cuDNN-free **ORT is faster on both** (melo8k ~5×) — the reverse of the RAM picture.
-  The melo8k run is verified fair: ORT was fed the *exact* phoneme/tone ids RapidSpeech used, produced
-  the identical **17664-sample (2.21 s)** output, cuDNN-free **GPU == CPU corr 1.000000**, and an ASR
-  round-trip returns the sentence.
+- **Warm speed:** cuDNN-free **ORT/sherpa-onnx is faster on both** (melo8k ~5×) — the reverse of the RAM
+  picture. sherpa-onnx end-to-end ≈ the raw ORT forward + a small CPU frontend, confirming the pipeline
+  adds little over the graph.
+- **Correctness:** sherpa-onnx transcribes zh.wav correctly and its melo8k TTS **round-trips back to the
+  input sentence** ("人工智能正在改变世界"); the raw melo8k run is also verified bit-fair (identical
+  17664-sample output, cuDNN-free **GPU == CPU corr 1.000000**).
 - **Caveat:** these are GB10 numbers via sm_53 PTX-JIT'd-then-cached kernels — *relative* only; real
   Nano Maxwell silicon is still TBD.
 
@@ -105,6 +121,8 @@ Full detail + per-op cuDNN-free table: [`docs/cudnn-free-ort-vs-rapidspeech-nano
   (ORT 1.11, the Nano build) and [`cudnn-free-cuda-ep`](https://github.com/vieenrose/onnxruntime/tree/cudnn-free-cuda-ep) (ORT 1.23 reference).
 - **[vieenrose/RapidSpeech.cpp](https://github.com/vieenrose/RapidSpeech.cpp)** — Jetson Nano gen1
   CUDA-10.2 / sm_53 build + melo8k Vocos8k vocoder, on the [`jetson-nano-gen1`](https://github.com/vieenrose/RapidSpeech.cpp/tree/jetson-nano-gen1) branch.
+- **[vieenrose/sherpa-onnx](https://github.com/vieenrose/sherpa-onnx)** — builds + runs end-to-end on
+  the cuDNN-free ORT 1.11 (ORT-1.11 API fix + build recipe), on the [`cudnn-free-ort-1.11-jetson-nano`](https://github.com/vieenrose/sherpa-onnx/tree/cudnn-free-ort-1.11-jetson-nano) branch.
 
 **Models** (fetched by `setup.sh`):
 

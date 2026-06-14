@@ -67,6 +67,28 @@ RAM picture where RapidSpeech is ~2× lighter. Caveats: ORT runs the int8 SenseV
 Q5_K (different quant); and **both are GB10 numbers on sm_53 PTX JIT'd to sm_121** — not optimal SASS
 for either Maxwell or Blackwell, so these are *relative* only. Real Nano silicon stays TBD.
 
+## sherpa-onnx end-to-end on the cuDNN-free EP (the real pipeline)
+
+The numbers above run the bare ONNX graphs (`ort_bench` / `melo_synth`). To measure the *actual*
+deployable path, **sherpa-onnx** itself was built against the cuDNN-free ORT 1.11 and run end-to-end
+(frontend + ORT GPU forward + decode), warm, in the CUDA-10.2 container. Fork:
+[vieenrose/sherpa-onnx@`cudnn-free-ort-1.11-jetson-nano`](https://github.com/vieenrose/sherpa-onnx/tree/cudnn-free-ort-1.11-jetson-nano).
+Two things were needed: one ORT-1.11 API fix (`offline-catt-model.cc` — drop `const` on
+`Impl::Allocator()`; the non-const `operator OrtAllocator*()` is ORT ≥1.12), and `GraphOptimizationLevel=1`
+(`ORT_ENABLE_BASIC`) at runtime to skip the cuDNN-only **FusedConv** (Conv+activation fusion).
+
+| Model — warm, cuDNN-free CUDA | RapidSpeech (ggml) | **sherpa-onnx end-to-end** | raw ORT graph |
+|---|---|---|---|
+| SenseVoice ASR | 501 ms / 756 MB | **443 ms** / 1227 MB (RTF 0.079) | 376 ms / 1224 MB |
+| melo8k TTS (same utterance) | 268 ms / 572 MB | **55 ms** / 736 MB | 54 ms / 721 MB |
+
+- sherpa-onnx end-to-end ≈ raw ORT forward + a small CPU frontend (the pipeline adds little).
+- **Correctness**: sherpa transcribes `zh.wav` correctly ("开饭时间早上九点至下午五点"), and its melo8k
+  TTS **round-trips** through SenseVoice back to the input ("人工智能正在改变世界") — exact.
+- Same caveat: GB10 sm_53-JIT numbers, relative only. Notably, cuDNN-free GPU here is **not** faster
+  than sherpa-CPU on these small models — the "does GPU help on the Nano" question stays open for real
+  hardware.
+
 ---
 
 All five now run cuDNN-free on ORT 1.11.0. Two issues that *looked* fatal turned out tractable:
