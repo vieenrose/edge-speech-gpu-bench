@@ -27,6 +27,33 @@ not Nano-representative. ORT figures are warm medians. Note: RapidSpeech's curre
 no longer builds for CUDA 10.2 — its ggml moved to C++17, which nvcc 10.2 can't compile;
 the Nano build lives on the `jetson-nano-gen1` branch.)*
 
+## Fair warm speed (load + PTX-JIT excluded)
+
+The RapidSpeech wall above is dominated by one-time cuBLAS-10.2 PTX-JIT on the GB10. To compare
+*warm* speed fairly, JIT and model-load are removed from both engines:
+
+- **RapidSpeech** — its internal `encoder takes` / `decoder takes` timers start *after* model load;
+  running each model **twice in one container with a shared `CUDA_CACHE_PATH`** lets run-2 load
+  JIT'd SASS from cache. The extraction is stark: SenseVoice encoder **57.2 s cold → 0.50 s warm**.
+- **ORT** — the harness already does 3 warmup runs before timing 10; `warm_ms` is the median.
+
+| Model — warm, GPU, cuDNN-free | RapidSpeech (ggml, gen1) | cuDNN-free ORT 1.11 |
+|---|---|---|
+| **SenseVoice** full forward (~100 enc frames) | 501 ms (enc 500 + dec 1) | **376 ms** |
+| **melo8k** (47 phonemes) | 268 ms → 2.21 s audio, RTF 0.121 | 47 ms* |
+
+\*ORT runs the raw melo8k graph on **synthetic** phonemes, so its duration-predictor output length is
+uncontrolled (≠ RapidSpeech's 2.21 s) — TTS speed is **not output-matched** across the two harnesses;
+only RapidSpeech's RTF 0.121 is a real-audio figure.
+
+**Reading it:** on the one cleanly-matched workload (SenseVoice ASR, ~100 frames) the cuDNN-free ORT
+forward is **~25–30 % faster** than RapidSpeech's ggml forward (376 vs 501 ms) — the reverse of the
+RAM picture, where RapidSpeech is ~2× lighter. Caveats: ORT runs the int8 SenseVoice, RapidSpeech the
+Q5_K (different quant); and **both are GB10 numbers on sm_53 PTX JIT'd to sm_121** — not optimal SASS
+for either Maxwell or Blackwell, so these are *relative* only. Real Nano silicon stays TBD.
+
+---
+
 All five now run cuDNN-free on ORT 1.11.0. Two issues that *looked* fatal turned out tractable:
 - **melo8k opset-17** → decomposed `LayerNormalization` to opset 16 (`model.opset16.onnx`, numerically
   identical, on the HF repo).
