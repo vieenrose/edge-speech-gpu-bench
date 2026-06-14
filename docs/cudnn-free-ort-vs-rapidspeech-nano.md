@@ -13,11 +13,19 @@ CUDA-10.2 container on the DGX Spark (cc → sm_53 via PTX-JIT). Models: SenseVo
 
 | Model | RapidSpeech CUDA (ggml) | cuDNN-free ORT **1.11.0** CUDA |
 |---|---|---|
-| **SenseVoice** | **761 MB** | ✅ 375 ms / **1215 MB** |
-| **silero-VAD** | ~in ASR pipeline | ✅ 2.6 ms / **560 MB** |
-| **melo8k** | **776 MB**, GPU==CPU | ✅ 45 ms / **732 MB** (via `model.opset16.onnx`) |
+| **SenseVoice** | **756 MB** | ✅ 373 ms / **1224 MB** |
+| **silero-VAD** | (in ASR pipeline above) | ✅ 2.6 ms / **571 MB** |
+| **melo8k** | **572 MB** | ✅ 45 ms / **721 MB** (via `model.opset16.onnx`) |
 | **TEN-VAD** | n/a (onnx-only) | ✅ **0.4 ms / 559 MB** |
-| **X-ASR-enc** (480ms) | n/a (onnx-only) | ✅ 323 ms / **1194 MB** |
+| **X-ASR-enc** (480ms) | n/a (onnx-only) | ✅ 325 ms / **1196 MB** |
+
+*(Re-measured 2026-06-14 in the CUDA-10.2 container on the GB10. RapidSpeech from the
+`jetson-nano-gen1` branch — ggml `b2a092a` + the sm_53 patch — built and ran cleanly;
+its peak-RSS column is the comparable metric. Its wall times are whole-process incl.
+one-time cuBLAS-10.2 PTX-JIT on the GB10, so not warm-comparable to ORT's `warm_ms` and
+not Nano-representative. ORT figures are warm medians. Note: RapidSpeech's current `main`
+no longer builds for CUDA 10.2 — its ggml moved to C++17, which nvcc 10.2 can't compile;
+the Nano build lives on the `jetson-nano-gen1` branch.)*
 
 All five now run cuDNN-free on ORT 1.11.0. Two issues that *looked* fatal turned out tractable:
 - **melo8k opset-17** → decomposed `LayerNormalization` to opset 16 (`model.opset16.onnx`, numerically
