@@ -1,5 +1,5 @@
 diff --git a/onnxruntime/core/providers/cuda/cuda_execution_provider.cc b/onnxruntime/core/providers/cuda/cuda_execution_provider.cc
-index e036c77..ce357d5 100644
+index e036c77..c869dae 100644
 --- a/onnxruntime/core/providers/cuda/cuda_execution_provider.cc
 +++ b/onnxruntime/core/providers/cuda/cuda_execution_provider.cc
 @@ -177,9 +177,11 @@ CUDAExecutionProvider::PerThreadContext::PerThreadContext(OrtDevice::DeviceId de
@@ -25,6 +25,38 @@ index e036c77..ce357d5 100644
  }
  
  bool CUDAExecutionProvider::PerThreadContext::IsGraphCaptureAllowed(
+@@ -1795,6 +1799,7 @@ static Status RegisterCudaKernels(KernelRegistry& kernel_registry) {
+       BuildKernelCreateInfo<ONNX_OPERATOR_TYPED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 6, float, InstanceNormalization)>,
+       BuildKernelCreateInfo<ONNX_OPERATOR_TYPED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 6, double, InstanceNormalization)>,
+       BuildKernelCreateInfo<ONNX_OPERATOR_TYPED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 6, MLFloat16, InstanceNormalization)>,
++#ifndef ORT_CUDA_NO_CUDNN  // RNN/GRU/LSTM use cuDNN; route them to the CPU EP when cuDNN-free
+       BuildKernelCreateInfo<ONNX_OPERATOR_VERSIONED_TYPED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 7, 13, float, RNN)>,
+       BuildKernelCreateInfo<ONNX_OPERATOR_VERSIONED_TYPED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 7, 13, double, RNN)>,
+       BuildKernelCreateInfo<ONNX_OPERATOR_VERSIONED_TYPED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 7, 13, MLFloat16, RNN)>,
+@@ -1804,6 +1809,7 @@ static Status RegisterCudaKernels(KernelRegistry& kernel_registry) {
+       BuildKernelCreateInfo<ONNX_OPERATOR_VERSIONED_TYPED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 7, 13, float, LSTM)>,
+       BuildKernelCreateInfo<ONNX_OPERATOR_VERSIONED_TYPED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 7, 13, double, LSTM)>,
+       BuildKernelCreateInfo<ONNX_OPERATOR_VERSIONED_TYPED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 7, 13, MLFloat16, LSTM)>,
++#endif
+       BuildKernelCreateInfo<ONNX_OPERATOR_VERSIONED_TYPED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 1, 9, int64_t, Slice)>,
+       BuildKernelCreateInfo<ONNX_OPERATOR_VERSIONED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 9, 10, Compress)>,
+       BuildKernelCreateInfo<ONNX_OPERATOR_VERSIONED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 9, 10, Flatten)>,
+@@ -2289,6 +2295,7 @@ static Status RegisterCudaKernels(KernelRegistry& kernel_registry) {
+       BuildKernelCreateInfo<ONNX_OPERATOR_TYPED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 14, double, Div)>,
+       BuildKernelCreateInfo<ONNX_OPERATOR_TYPED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 14, MLFloat16, Div)>,
+       BuildKernelCreateInfo<ONNX_OPERATOR_VERSIONED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 14, 18, Identity)>,
++#ifndef ORT_CUDA_NO_CUDNN  // RNN/GRU/LSTM use cuDNN; route them to the CPU EP when cuDNN-free
+       BuildKernelCreateInfo<ONNX_OPERATOR_TYPED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 14, float, RNN)>,
+       BuildKernelCreateInfo<ONNX_OPERATOR_TYPED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 14, double, RNN)>,
+       BuildKernelCreateInfo<ONNX_OPERATOR_TYPED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 14, MLFloat16, RNN)>,
+@@ -2298,6 +2305,7 @@ static Status RegisterCudaKernels(KernelRegistry& kernel_registry) {
+       BuildKernelCreateInfo<ONNX_OPERATOR_TYPED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 14, float, LSTM)>,
+       BuildKernelCreateInfo<ONNX_OPERATOR_TYPED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 14, double, LSTM)>,
+       BuildKernelCreateInfo<ONNX_OPERATOR_TYPED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 14, MLFloat16, LSTM)>,
++#endif
+       BuildKernelCreateInfo<ONNX_OPERATOR_VERSIONED_KERNEL_CLASS_NAME(kCudaExecutionProvider, kOnnxDomain, 14, 18, Reshape)>,
+       BuildKernelCreateInfo<ONNX_OPERATOR_VERSIONED_TYPED_KERNEL_CLASS_NAME(
+           kCudaExecutionProvider, kOnnxDomain, 14, 14, float, BatchNormalization)>,
 diff --git a/onnxruntime/core/providers/cuda/cuda_stream_handle.cc b/onnxruntime/core/providers/cuda/cuda_stream_handle.cc
 index fbee184..eae64f1 100644
 --- a/onnxruntime/core/providers/cuda/cuda_stream_handle.cc
@@ -165,10 +197,10 @@ index 3129f51..959ca1a 100644
    if (s_.Y->Shape().Size() == 0) {
 diff --git a/onnxruntime/core/providers/cuda/nn/conv_nocudnn.cu b/onnxruntime/core/providers/cuda/nn/conv_nocudnn.cu
 new file mode 100644
-index 0000000..786cb0c
+index 0000000..ec3c11a
 --- /dev/null
 +++ b/onnxruntime/core/providers/cuda/nn/conv_nocudnn.cu
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,139 @@
 +// cuDNN-free convolution building blocks for the CUDA EP (Jetson Nano gen1 fork).
 +// im2col + cuBLAS GEMM replaces cudnnConvolutionForward so the CUDA EP needs no cuDNN.
 +// Layout: NCHW. Conv1d is handled by the caller mapping the single spatial dim onto W (H=1).
@@ -221,6 +253,54 @@ index 0000000..786cb0c
 +  }
 +}
 +
++// Caffe-style col2im (scatter-add): the reverse of im2col, for ConvTranspose.
++// col is [channels*kH*kW, col_h*col_w]; accumulates into data_im [channels, img_h, img_w].
++// img_* = output (Y) spatial; col_* = input (X) spatial. data_im must be pre-zeroed.
++template <typename T>
++__global__ void Col2imNCHWKernel(const int n, const T* data_col,
++                                 const int img_h, const int img_w, const int kh, const int kw,
++                                 const int pad_t, const int pad_l, const int stride_h, const int stride_w,
++                                 const int dil_h, const int dil_w, const int col_h, const int col_w,
++                                 T* data_im) {
++  for (int index = blockIdx.x * blockDim.x + threadIdx.x; index < n;
++       index += blockDim.x * gridDim.x) {
++    T val = T(0);
++    const int w_im = index % img_w + pad_l;
++    const int h_im = (index / img_w) % img_h + pad_t;
++    const int c = index / (img_w * img_h);
++    const int kext_w = (kw - 1) * dil_w + 1;
++    const int kext_h = (kh - 1) * dil_h + 1;
++    const int w_col_start = (w_im < kext_w) ? 0 : (w_im - kext_w) / stride_w + 1;
++    const int w_col_end = min(w_im / stride_w + 1, col_w);
++    const int h_col_start = (h_im < kext_h) ? 0 : (h_im - kext_h) / stride_h + 1;
++    const int h_col_end = min(h_im / stride_h + 1, col_h);
++    for (int h_col = h_col_start; h_col < h_col_end; ++h_col) {
++      for (int w_col = w_col_start; w_col < w_col_end; ++w_col) {
++        int h_k = h_im - h_col * stride_h;
++        int w_k = w_im - w_col * stride_w;
++        if (h_k % dil_h == 0 && w_k % dil_w == 0) {
++          h_k /= dil_h; w_k /= dil_w;
++          const int col_idx = (((c * kh + h_k) * kw + w_k) * col_h + h_col) * col_w + w_col;
++          val += data_col[col_idx];
++        }
++      }
++    }
++    data_im[index] = data_im[index] + val;
++  }
++}
++
++template <typename T>
++void Col2imNCHWLauncher(cudaStream_t stream, const T* data_col, int channels, int img_h, int img_w,
++                        int col_h, int col_w, int kh, int kw, int pad_t, int pad_l, int stride_h,
++                        int stride_w, int dil_h, int dil_w, T* data_im) {
++  const int n = channels * img_h * img_w;
++  const int threads = 256;
++  const int blocks = (n + threads - 1) / threads;
++  Col2imNCHWKernel<T><<<blocks, threads, 0, stream>>>(
++      n, data_col, img_h, img_w, kh, kw, pad_t, pad_l, stride_h, stride_w, dil_h, dil_w,
++      col_h, col_w, data_im);
++}
++
 +template <typename T>
 +void Im2colNCHWLauncher(cudaStream_t stream, const T* data_im, int channels, int height,
 +                        int width, int kh, int kw, int pad_h, int pad_w, int stride_h,
@@ -251,6 +331,105 @@ index 0000000..786cb0c
 +template void Im2colNCHWLauncher<double>(cudaStream_t, const double*, int, int, int, int, int,
 +                                         int, int, int, int, int, int, int, int, double*);
 +template void AddBiasNCHWLauncher<double>(cudaStream_t, double*, const double*, int, int);
++template void Col2imNCHWLauncher<float>(cudaStream_t, const float*, int, int, int, int, int, int,
++                                        int, int, int, int, int, int, int, float*);
++template void Col2imNCHWLauncher<half>(cudaStream_t, const half*, int, int, int, int, int, int,
++                                       int, int, int, int, int, int, int, half*);
++template void Col2imNCHWLauncher<double>(cudaStream_t, const double*, int, int, int, int, int, int,
++                                         int, int, int, int, int, int, int, double*);
 +
 +}  // namespace cuda
 +}  // namespace onnxruntime
+diff --git a/onnxruntime/core/providers/cuda/nn/conv_transpose.cc b/onnxruntime/core/providers/cuda/nn/conv_transpose.cc
+index 2972ae9..104ca7f 100644
+--- a/onnxruntime/core/providers/cuda/nn/conv_transpose.cc
++++ b/onnxruntime/core/providers/cuda/nn/conv_transpose.cc
+@@ -5,6 +5,7 @@
+ #include <utility>
+ 
+ #include "conv_transpose.h"
++#include "core/providers/cuda/shared_inc/fpgeneric.h"  // cublasGemmHelper (cuDNN-free convtranspose)
+ #include "core/providers/cuda/tensor/transpose.h"
+ 
+ #if CUDNN_MAJOR < 9
+@@ -499,8 +500,80 @@ Status ConvTranspose<T, Layout>::DoConvTranspose(OpKernelContext* context, bool
+ }
+ #endif
+ 
++// cuDNN-free convtranspose launchers (defined in conv_nocudnn.cu) — Jetson Nano gen1 fork.
++// signature: (stream, col, channels, img_h, img_w, col_h, col_w, kh, kw, pad_t, pad_l,
++//             stride_h, stride_w, dil_h, dil_w, im)  -> 13 ints
++template <typename U>
++void Col2imNCHWLauncher(cudaStream_t, const U*, int, int, int, int, int, int, int, int, int, int,
++                        int, int, int, U*);
++template <typename U>
++void AddBiasNCHWLauncher(cudaStream_t, U*, const U*, int, int);
++
+ template <typename T, bool Layout>
+ Status ConvTranspose<T, Layout>::ComputeInternal(OpKernelContext* context) const {
++#if defined(ORT_CUDA_NO_CUDNN_CONV)
++  if constexpr (Layout == LAYOUT_NCHW) {
++    const bool has_bias = context->InputCount() >= 3;
++    typename ConvTransposeAttributes::Prepare p;
++    ORT_RETURN_IF_ERROR(conv_transpose_attrs_.PrepareForCompute(context, has_bias, p, false));
++    const int krank = static_cast<int>(p.kernel_shape.size());
++    if (p.Y->Shape().Size() != 0 && (krank == 1 || krank == 2)) {
++      const int64_t group = conv_transpose_attrs_.group;
++      const int Cin_g = static_cast<int>(p.num_input_channels / group);
++      const int Cout_g = static_cast<int>(p.num_output_channels / group);
++      int H, Wd, kH, kW, padT, padL, strH, strW, dilH, dilW, outH, outW;
++      if (krank == 2) {
++        H = (int)p.input_shape[0]; Wd = (int)p.input_shape[1];
++        kH = (int)p.kernel_shape[0]; kW = (int)p.kernel_shape[1];
++        padT = (int)p.pads[0]; padL = (int)p.pads[1];
++        strH = (int)p.strides[0]; strW = (int)p.strides[1];
++        dilH = (int)p.dilations[0]; dilW = (int)p.dilations[1];
++        outH = (int)p.Y->Shape()[2]; outW = (int)p.Y->Shape()[3];
++      } else {  // ConvTranspose1d -> (H=1, W=L)
++        H = 1; Wd = (int)p.input_shape[0];
++        kH = 1; kW = (int)p.kernel_shape[0];
++        padT = 0; padL = (int)p.pads[0];
++        strH = 1; strW = (int)p.strides[0];
++        dilH = 1; dilW = (int)p.dilations[0];
++        outH = 1; outW = (int)p.Y->Shape()[2];
++      }
++      const int input_image_size = H * Wd;
++      const int kernel_dim = Cout_g * kH * kW;
++      auto col = GetScratchBuffer<CudaT>(static_cast<size_t>(kernel_dim) * input_image_size,
++                                         context->GetComputeStream());
++      cudaStream_t stream = Stream(context);
++      cublasHandle_t cublas = GetCublasHandle(context);
++      const CudaT* xdata = reinterpret_cast<const CudaT*>(p.X->Data<T>());
++      const CudaT* fdata = reinterpret_cast<const CudaT*>(p.F->Data<T>());
++      CudaT* ydata = reinterpret_cast<CudaT*>(p.Y->MutableData<T>());
++      CUDA_RETURN_IF_ERROR(cudaMemsetAsync(ydata, 0, p.Y->Shape().Size() * sizeof(CudaT), stream));
++      const CudaT one = onnxruntime::cuda::Consts<CudaT>::One;
++      const CudaT zero = onnxruntime::cuda::Consts<CudaT>::Zero;
++      for (int64_t n = 0; n < p.N; ++n) {
++        for (int64_t g = 0; g < group; ++g) {
++          const CudaT* xg = xdata + (n * p.num_input_channels + g * Cin_g) * (int64_t)input_image_size;
++          const CudaT* fg = fdata + g * (int64_t)Cin_g * kernel_dim;
++          CudaT* yg = ydata + (n * p.num_output_channels + g * Cout_g) * (int64_t)outH * outW;
++          // ORT CPU: Gemm(Trans, NoTrans, kernel_dim, input_image_size, Cin_g, filter, X) -> col
++          // row-major col[kernel_dim, input_image_size] = filter^T @ X
++          CUBLAS_RETURN_IF_ERROR(cublasGemmHelper(cublas, CUBLAS_OP_N, CUBLAS_OP_T,
++                                                  input_image_size, kernel_dim, Cin_g, &one,
++                                                  xg, input_image_size, fg, kernel_dim, &zero,
++                                                  col.get(), input_image_size, GetDeviceProp(), false));
++          Col2imNCHWLauncher<CudaT>(stream, col.get(), Cout_g, outH, outW, H, Wd, kH, kW,
++                                    padT, padL, strH, strW, dilH, dilW, yg);
++        }
++      }
++      if (p.B != nullptr) {
++        const CudaT* bdata = reinterpret_cast<const CudaT*>(p.B->Data<T>());
++        for (int64_t n = 0; n < p.N; ++n)
++          AddBiasNCHWLauncher<CudaT>(stream, ydata + n * p.num_output_channels * (int64_t)outH * outW,
++                                     bdata, (int)p.num_output_channels, outH * outW);
++      }
++      return Status::OK();
++    }
++  }
++#endif
+   return DoConvTranspose(context, false);
+ }
+ 

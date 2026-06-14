@@ -40,9 +40,9 @@ run(Ort::Env& env, const char* model, bool cuda) {
   return {outnames, outs};
 }
 
-int main() {
+int main(int argc, char** argv) {
   Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "convtest");
-  const char* model = "/tmp/conv_test.onnx";
+  const char* model = argc > 1 ? argv[1] : "/tmp/conv_test.onnx";
   auto cpu = run(env, model, false);
   auto cu = run(env, model, true);
   double maxdiff = 0;

@@ -64,6 +64,20 @@ the per-library measurement; on the Nano's small CUDA-10.2 context the cuDNN del
 Fork: **[`vieenrose/onnxruntime@cudnn-free-cuda-conv-jetson`](https://github.com/vieenrose/onnxruntime/tree/cudnn-free-cuda-conv-jetson)**
 (commit `885c0ad`); mirror `patches/onnxruntime-cudnn-free-cuda.patch`.
 
+## Coverage: all three target models are now cuDNN-free
+
+| Model | cuDNN-requiring ops | cuDNN-free handling | Validated |
+|---|---|---|---|
+| **SenseVoice** | Conv (70), Softmax | Conv → im2col+cuBLAS; Softmax → ORT's own kernels | Conv 9.5e-7 |
+| **melo8k** | Conv (166), ConvTranspose (3) | Conv + ConvTranspose (col2im+cuBLAS) | Conv 9.5e-7, ConvT 4.8e-7 |
+| **silero-VAD** | Conv (18), LSTM (2) | Conv → cuBLAS; LSTM → CPU EP (small, CPU-preferred) | LSTM route 1.4e-4 |
+
+None use Pooling or BatchNorm, so with Conv + ConvTranspose cuDNN-free, Softmax already custom,
+and RNN/GRU/LSTM routed to CPU under `-DORT_CUDA_NO_CUDNN`, **the CUDA EP runs all three with no
+cuDNN op** — and `cudnnCreate` is skipped, so cuDNN is never initialized.
+
+Build flags for the cuDNN-free EP: `-DORT_CUDA_NO_CUDNN_CONV -DORT_CUDA_NO_CUDNN`.
+
 ## What remains for the full RAM win (Phase 2 cont.)
 
 The PoC proves convolution works without cuDNN. To actually **drop cuDNN from the binary** (the
