@@ -9,15 +9,25 @@ CUDA-10.2 container on the DGX Spark (cc → sm_53 via PTX-JIT). Models: SenseVo
 > garbage shape passed to `CreateTensor`), not ORT. With it fixed, the cuDNN-free ORT 1.11.0 runs
 > most models. Numbers below are the corrected, real measurements.
 
-## Results (peak RSS + warm time)
+## Results (peak RSS + warm time) — full 5/5 on cuDNN-free ORT 1.11.0
 
 | Model | RapidSpeech CUDA (ggml) | cuDNN-free ORT **1.11.0** CUDA |
 |---|---|---|
-| **SenseVoice** | **761 MB** | ✅ 383 ms / **1445 MB** |
-| **silero-VAD** | ~in ASR pipeline | ✅ 2.5 ms / **569 MB** |
-| **X-ASR-enc** (480ms) | n/a (onnx-only) | ✅ 324 ms / **1205 MB** |
-| **melo8k** | **776 MB**, GPU==CPU | ❌ **opset 17** (LayerNormalization) — ORT 1.11 ceiling |
-| **TEN-VAD** | n/a (onnx-only) | ❌ Conv→cuDNN holdout (FusedConv / asymmetric-pad conv) |
+| **SenseVoice** | **761 MB** | ✅ 375 ms / **1215 MB** |
+| **silero-VAD** | ~in ASR pipeline | ✅ 2.6 ms / **560 MB** |
+| **melo8k** | **776 MB**, GPU==CPU | ✅ 45 ms / **732 MB** (via `model.opset16.onnx`) |
+| **TEN-VAD** | n/a (onnx-only) | ✅ **0.4 ms / 559 MB** |
+| **X-ASR-enc** (480ms) | n/a (onnx-only) | ✅ 323 ms / **1194 MB** |
+
+All five now run cuDNN-free on ORT 1.11.0. Two issues that *looked* fatal turned out tractable:
+- **melo8k opset-17** → decomposed `LayerNormalization` to opset 16 (`model.opset16.onnx`, numerically
+  identical, on the HF repo).
+- **TEN-VAD Conv→cuDNN** → the depthwise conv used TF-style "SAME"/asymmetric padding, which the
+  initial cuDNN-free Conv skipped (`!post_slice` bail → cuDNN fallback). Fixed by computing per-dim
+  pads with `ComputePadAndOutputShape(..., force_symmetric=false)` so im2col handles asymmetric pads
+  directly. Conv numerics unchanged (max|CPU-CUDA| = 9.5e-7).
+- (An earlier "integer overflow" that appeared to block everything was a **benchmark-harness bug** —
+  a dangling `Ort::TypeInfo` — not ORT.)
 
 *(RSS is GB10-inflated: the box's ~1 GB CUDA-13 context dominates and masks the cuDNN saving — see
 `cudnn-free-ort-conv.md`. On a real 4 GB Nano with the small CUDA-10.2 context, absolute numbers are
@@ -36,15 +46,15 @@ model to run cuDNN-free was whack-a-mole, each op routed/replaced under `-Donnxr
 | **Pooling** (`cudnnPoolingForward`) | route to CPU EP | (TEN-VAD partial) |
 | **Reduce*** (`cudnnReduceTensor`) | route to CPU EP | **X-ASR** |
 | **FusedConv** (conv+act fusion) | disable fusion (`ORT_ENABLE_BASIC`) | silero |
-| Conv via cuDNN algo-search (asym-pad / FusedConv) | **TEN-VAD still blocked** | — |
+| Conv asym/TF-SAME pad (ComputePadAndOutputShape) | **TEN-VAD** | — |
 
 ## Takeaways for the deployment target
 
 - The **cuDNN-free CUDA EP works** — SenseVoice, silero, and the X-ASR streaming zipformer all run
   on ORT 1.11.0 (CUDA 10.2) with **no cuDNN**.
-- But two real walls remain: **melo8k** needs **opset-16 decomposition** (LayerNormalization isn't in
-  16), and **TEN-VAD** has a conv path that still reaches cuDNN (FusedConv / asymmetric-pad — needs a
-  FusedConv patch or post-slice handling). And the per-op whack-a-mole shows how cuDNN-coupled ORT is.
+- Both walls were cleared: **melo8k** runs via opset-16 LayerNorm decomposition; **TEN-VAD** runs
+  after handling TF-SAME/asymmetric conv padding. But the per-op whack-a-mole (Conv/ConvTranspose/Pool/
+  Reduce/RNN/FusedConv all needed work) shows how deeply cuDNN-coupled ORT's CUDA EP is.
 - **On RAM, ggml/RapidSpeech wins clearly**: SenseVoice **761 MB** vs ORT **1445 MB** on the same box
   — even cuDNN-free, ORT's framework/arena overhead roughly doubles ggml's footprint.
 - **RapidSpeech runs all three of its models** (SenseVoice/silero/melo8k) at ~0.76 GB, with **no opset
