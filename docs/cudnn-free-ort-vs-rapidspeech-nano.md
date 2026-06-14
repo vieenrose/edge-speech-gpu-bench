@@ -40,15 +40,30 @@ The RapidSpeech wall above is dominated by one-time cuBLAS-10.2 PTX-JIT on the G
 | Model — warm, GPU, cuDNN-free | RapidSpeech (ggml, gen1) | cuDNN-free ORT 1.11 |
 |---|---|---|
 | **SenseVoice** full forward (~100 enc frames) | 501 ms (enc 500 + dec 1) | **376 ms** |
-| **melo8k** (47 phonemes) | 268 ms → 2.21 s audio, RTF 0.121 | 47 ms* |
+| **melo8k** — *same utterance*, 2.21 s out | 268 ms (RTF 0.121) | **54 ms** (RTF 0.024) |
 
-\*ORT runs the raw melo8k graph on **synthetic** phonemes, so its duration-predictor output length is
-uncontrolled (≠ RapidSpeech's 2.21 s) — TTS speed is **not output-matched** across the two harnesses;
-only RapidSpeech's RTF 0.121 is a real-audio figure.
+### melo8k made fair: same utterance, verified correct synthesis
 
-**Reading it:** on the one cleanly-matched workload (SenseVoice ASR, ~100 frames) the cuDNN-free ORT
-forward is **~25–30 % faster** than RapidSpeech's ggml forward (376 vs 501 ms) — the reverse of the
-RAM picture, where RapidSpeech is ~2× lighter. Caveats: ORT runs the int8 SenseVoice, RapidSpeech the
+Earlier the melo8k row wasn't comparable — ORT was fed *synthetic* phonemes, so its stochastic
+duration predictor emitted an uncontrolled (≠ 2.21 s) length. Fixed by feeding ORT the **exact**
+phoneme/tone ids RapidSpeech used for "人工智能正在改变世界。" plus the real control scalars
+(`length_scale=1.0`, `noise_scale=0.667`, speaker 1), so both engines generate the identical
+utterance. Verified:
+- **Vocab identical** — RapidSpeech's ids decode to the correct pinyin in the ORT model's `tokens.txt`
+  (`r en | g ong | zh ir | n eng | …` = rén gōng zhì néng …).
+- **Output length identical** — both produce exactly **17664 samples = 2.21 s @ 8 kHz** (shared
+  duration predictor agrees).
+- **cuDNN-free GPU == CPU** numerically — corr **1.000000** with deterministic `noise_scale=0`
+  (the per-sample difference at `noise_scale=0.667` is VITS's by-design stochastic flow noise, not error).
+- **ASR round-trip** — feeding each synthesized wav back through SenseVoice returns the sentence
+  (RapidSpeech "…世界。" exact; ORT "…事件。", 10/11 chars — last syllable slip from the crude 8k→16k
+  upsample, phonemes were correct).
+
+On this matched workload **ORT is ~5× faster (54 vs 268 ms)** for the identical 2.21 s output.
+
+**Reading it:** on *both* matched workloads — SenseVoice ASR (376 vs 501 ms) and melo8k TTS (54 vs
+268 ms) — the cuDNN-free ORT forward is **faster** than RapidSpeech's ggml forward, the reverse of the
+RAM picture where RapidSpeech is ~2× lighter. Caveats: ORT runs the int8 SenseVoice, RapidSpeech the
 Q5_K (different quant); and **both are GB10 numbers on sm_53 PTX JIT'd to sm_121** — not optimal SASS
 for either Maxwell or Blackwell, so these are *relative* only. Real Nano silicon stays TBD.
 
