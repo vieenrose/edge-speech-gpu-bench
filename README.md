@@ -60,9 +60,58 @@ on `CUDA0`). **Speed pending the real device.** See
 [`docs/jetson-nano-gen1-feasibility.md`](docs/jetson-nano-gen1-feasibility.md).
 TensorRT 8.2.1 path analyzed too — see [`docs/tensorrt-jetson-nano-gen1.md`](docs/tensorrt-jetson-nano-gen1.md) (it doesn't escape cuDNN's 782 MB by default).
 
+## Deployment-target deliverable #2: cuDNN-free onnxruntime CUDA (sherpa-onnx's engine)
+sherpa-onnx runs on **onnxruntime**, whose stock CUDA EP pulls in **cuDNN (~782 MB resident** on the
+Nano's cuDNN 8) — prohibitive on a 4 GB device. So the second deliverable is a **cuDNN-free,
+cuBLAS-only CUDA Execution Provider** for onnxruntime, built with one switch
+`-Donnxruntime_CUDA_NO_CUDNN=ON`: Conv/ConvTranspose → im2col/col2im + cuBLAS (incl. asymmetric/TF-SAME
+pad), Pooling/Reduce/RNN → CPU EP, and `cudnnCreate` skipped so cuDNN is never loaded. All **5 models
+run cuDNN-free** on the Nano toolchain (ORT 1.11.0 / CUDA 10.2 / sm_53): SenseVoice, silero-VAD,
+melo8k (opset-16), TEN-VAD, X-ASR. Shipped to **[vieenrose/onnxruntime](https://github.com/vieenrose/onnxruntime)**:
+- [`cudnn-free-cuda-jetson-nano-gen1`](https://github.com/vieenrose/onnxruntime/tree/cudnn-free-cuda-jetson-nano-gen1) — ORT 1.11.0, the **deployable Nano build** (CUDA 10.2; last ORT to support it).
+- [`cudnn-free-cuda-ep`](https://github.com/vieenrose/onnxruntime/tree/cudnn-free-cuda-ep) — ORT 1.23.1, modern-CUDA **reference** (does *not* run on the Nano — needs CUDA 12/13).
+
+### Head-to-head: cuDNN-free ORT vs RapidSpeech (both on the Nano toolchain)
+Both engines cuDNN-free, in the CUDA-10.2 container with sm_53 dispatch. Warm = model-load **and**
+one-time PTX-JIT excluded; inputs matched.
+
+| Model | RapidSpeech (ggml): RSS / warm | cuDNN-free ORT 1.11: RSS / warm |
+|---|---|---|
+| SenseVoice (~100 enc frames) | **756 MB** / 501 ms | 1224 MB / **376 ms** |
+| melo8k (*same* 2.21 s utterance) | **572 MB** / 268 ms | 721 MB / **54 ms** |
+
+- **RAM:** RapidSpeech is **~2× lighter** (ggml vs ORT's arena+framework overhead).
+- **Warm speed:** cuDNN-free **ORT is faster on both** (melo8k ~5×) — the reverse of the RAM picture.
+  The melo8k run is verified fair: ORT was fed the *exact* phoneme/tone ids RapidSpeech used, produced
+  the identical **17664-sample (2.21 s)** output, cuDNN-free **GPU == CPU corr 1.000000**, and an ASR
+  round-trip returns the sentence.
+- **Caveat:** these are GB10 numbers via sm_53 PTX-JIT'd-then-cached kernels — *relative* only; real
+  Nano Maxwell silicon is still TBD.
+
+Full detail + per-op cuDNN-free table: [`docs/cudnn-free-ort-vs-rapidspeech-nano.md`](docs/cudnn-free-ort-vs-rapidspeech-nano.md),
+[`docs/cudnn-free-ort-conv.md`](docs/cudnn-free-ort-conv.md).
+
 ## Hardware / notes
 - GB10 reports `N/A` for `nvidia-smi` GPU memory (unified memory).
 - sherpa-onnx CUDA on this box needs a from-source onnxruntime (CUDA-13 / sm_121); see
   `build/sherpa.md` + `BLOCKERS.md`.
 - The deployment target is **not** this box — it's Jetson Nano gen1 (sm_53, CUDA 10.2), where
   sherpa-onnx-CUDA is banned for RAM. This is a research comparison host.
+
+## Forks & models used in this benchmark
+**My forks (the changes this benchmark produced):**
+- **[vieenrose/onnxruntime](https://github.com/vieenrose/onnxruntime)** — cuDNN-free CUDA Execution
+  Provider. Branches: [`cudnn-free-cuda-jetson-nano-gen1`](https://github.com/vieenrose/onnxruntime/tree/cudnn-free-cuda-jetson-nano-gen1)
+  (ORT 1.11, the Nano build) and [`cudnn-free-cuda-ep`](https://github.com/vieenrose/onnxruntime/tree/cudnn-free-cuda-ep) (ORT 1.23 reference).
+- **[vieenrose/RapidSpeech.cpp](https://github.com/vieenrose/RapidSpeech.cpp)** — Jetson Nano gen1
+  CUDA-10.2 / sm_53 build + melo8k Vocos8k vocoder, on the [`jetson-nano-gen1`](https://github.com/vieenrose/RapidSpeech.cpp/tree/jetson-nano-gen1) branch.
+
+**Models** (fetched by `setup.sh`):
+
+| Model | sherpa-onnx / cuDNN-free ORT (ONNX) | RapidSpeech (gguf) |
+|---|---|---|
+| SenseVoice | [k2-fsa sense-voice-…-int8-2024-07-17](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2) | [RapidAI/RapidSpeech](https://huggingface.co/RapidAI/RapidSpeech) · `sense-voice-small-q5_k.gguf` |
+| melo8k TTS | [Luigi/vits-melo-tts-zh_en-8k](https://huggingface.co/Luigi/vits-melo-tts-zh_en-8k) · `model.opset16.onnx` (the ORT-1.11 / opset-16 build produced here) | [Luigi/openvoice2-melo8k-zh-gguf](https://huggingface.co/Luigi/openvoice2-melo8k-zh-gguf) |
+| silero-VAD | [k2-fsa silero_vad.onnx](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx) | [RapidAI/RapidSpeech](https://huggingface.co/RapidAI/RapidSpeech) · `silero_vad_v6.gguf` |
+| TEN-VAD | [k2-fsa ten-vad.onnx](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/ten-vad.onnx) | — (onnx-only) |
+| X-ASR (480 ms) | [GilgameshWind/X-ASR-zh-en](https://huggingface.co/GilgameshWind/X-ASR-zh-en) | — (onnx-only) |
