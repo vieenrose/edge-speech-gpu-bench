@@ -93,6 +93,17 @@ forward); "raw ORT graph" = the bare ONNX forward (my `ort_bench`/`melo_synth`).
 |---|---|---|---|
 | SenseVoice | **756 MB** / 501 ms | 1227 MB / 443 ms | 1224 MB / 376 ms |
 | melo8k (*same* utterance) | **572 MB** / 268 ms | 736 MB / **55 ms** | 721 MB / 54 ms |
+| **Matcha-TTS** (zh-tw/en 8k) | port in progress † | **681 MB / 139 ms** (3.96 s audio, RTF ~0.035) | — |
+
+† **Matcha-TTS** ([Luigi/matcha-zh-tw-en-8k](https://huggingface.co/Luigi/matcha-zh-tw-en-8k), a code-mixed
+zh-TW/en 8 kHz CFM model): runs end-to-end on sherpa-onnx cuDNN-free CUDA **today** — output matches the
+HF reference wav (3.96 s, rms 0.144 vs 0.147). This required a **new cuDNN-free EP adaptation**: Matcha's
+flow-decoder UNet uses `InstanceNormalization`, whose CUDA kernel calls cuDNN batchnorm → routed to the
+CPU EP under `ORT_CUDA_NO_CUDNN` (pushed to the onnxruntime fork). The vocos vocoder's opset-17
+`LayerNormalization` was decomposed to opset 16 (same trick as melo8k). The **RapidSpeech/ggml** port is
+underway — the onnx→gguf weight converter is done + validated (385 tensors round-trip), the full CFM
+arch (text encoder + flow-matching ODE loop + iSTFT vocos head) is in progress; see
+[the port design doc](https://github.com/vieenrose/RapidSpeech.cpp/blob/jetson-nano-gen1/docs/MATCHA_TTS_GGML_PORT.md).
 
 - **RAM:** RapidSpeech is **~2× lighter** (ggml vs ORT's arena+framework overhead).
 - **Warm speed:** cuDNN-free **ORT/sherpa-onnx is faster on both** (melo8k ~5×) — the reverse of the RAM
