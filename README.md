@@ -93,7 +93,7 @@ forward); "raw ORT graph" = the bare ONNX forward (my `ort_bench`/`melo_synth`).
 |---|---|---|---|
 | SenseVoice | **756 MB** / 501 ms | 1227 MB / 443 ms | 1224 MB / 376 ms |
 | melo8k (*same* utterance) | **572 MB** / 268 ms | 736 MB / **55 ms** | 721 MB / 54 ms |
-| **Matcha-TTS** (zh-tw/en 8k) | **493 MB** / 239 ms (CPU, RTF 0.075) ‡ | **681 MB / 139 ms** (3.96 s audio, RTF ~0.035) | — |
+| **Matcha-TTS** (zh-tw/en 8k) | **CPU 113 ms** / **CUDA 36 ms** ‡ | **681 MB / 139 ms** (3.96 s audio, RTF ~0.035) | — |
 
 † **Matcha-TTS** ([Luigi/matcha-zh-tw-en-8k](https://huggingface.co/Luigi/matcha-zh-tw-en-8k), a code-mixed
 zh-TW/en 8 kHz CFM model): runs end-to-end on sherpa-onnx cuDNN-free CUDA — output matches the
@@ -112,15 +112,19 @@ spec-extraction-and-adversarial-verify workflow then staged ggml validators; see
 and [vieenrose/RapidSpeech.cpp@`jetson-nano-gen1`](https://github.com/vieenrose/RapidSpeech.cpp/tree/jetson-nano-gen1)
 (`arch/matcha.cpp`).
 
-**Then auto-optimized (research + profiling):** the iSTFT was 75 % of runtime as a naive O(N²) DFT;
-replacing it with a radix-2 FFT was a **400× speedup of that stage (730 → 1.8 ms)** and **4.06× of the
-whole pipeline (971 → 239 ms, RTF 0.075, 493 MB)** with bit-identical audio (corr 1.0000000). The
-optimization research also established a structural verdict: **CUDA can't close the gap on the Nano gen1**
-because ggml gates CUDA-graph replay on `cc ≥ 800` (Ampere) and the Nano is sm_53 — so a launch-bound
-CFM graph runs every kernel individually, exactly the structural edge ORT's one-big-CUDA-graph has.
-Hence `matcha-tts` is routed to CPU; the FFT win is architecture-independent and carries to the Nano.
-(The two backends aren't directly comparable: ggml runs on CPU, sherpa-onnx on cuDNN-free CUDA, with
-different sentences — but Matcha now runs on **both**.)
+**Then auto-optimized + made CUDA-capable.** Two passes:
+1. **Profiling-driven (CPU):** the iSTFT was 75 % of runtime as a naive O(N²) DFT; a radix-2 FFT made it
+   **400× faster (730 → 1.8 ms)**, **4.06× of the whole pipeline (971 → 239 ms)**, audio bit-identical.
+2. **Backend refactor (CUDA):** `PushText` was CPU-only (it used `ggml_graph_compute_with_ctx`). Rewriting
+   it to the backend-agnostic `ggml_backend_sched` path made it **run on CUDA** (opt in `MATCHA_USE_CUDA=1`)
+   *and* **2× faster on CPU as a bonus** (dropped the 6 GB per-call context). Warm synth on the GB10:
+   **CPU 113 ms** (RTF 0.036, 493 MB) / **CUDA 36 ms** (RTF 0.011, + ~57 s one-time sm_53→sm_121 JIT).
+   Audio correct on both (CPU corr 0.99999, CUDA corr 0.996 vs the validated path).
+
+   On the gen1 the default stays CPU: ggml gates CUDA-graph replay on `cc ≥ 800` (Ampere) and the Nano is
+   sm_53, so a launch-bound CFM graph there can't amortize launches — whether CUDA beats the (now 113 ms)
+   CPU path on real Maxwell is an open hardware question; on Ampere+ (Orin) cuda-graphs engage and CUDA
+   should win. (Backends aren't directly comparable: different sentences; sherpa-onnx is cuDNN-free CUDA.)
 
 - **RAM:** RapidSpeech is **~2× lighter** (ggml vs ORT's arena+framework overhead).
 - **Warm speed:** cuDNN-free **ORT/sherpa-onnx is faster on both** (melo8k ~5×) — the reverse of the RAM
