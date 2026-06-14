@@ -76,23 +76,22 @@ None use Pooling or BatchNorm, so with Conv + ConvTranspose cuDNN-free, Softmax 
 and RNN/GRU/LSTM routed to CPU under `-DORT_CUDA_NO_CUDNN`, **the CUDA EP runs all three with no
 cuDNN op** — and `cudnnCreate` is skipped, so cuDNN is never initialized.
 
-Build flags for the cuDNN-free EP: `-DORT_CUDA_NO_CUDNN_CONV -DORT_CUDA_NO_CUDNN`.
+Build the cuDNN-free EP with a single switch: `-Donnxruntime_CUDA_NO_CUDNN=ON` (validated end-to-end: Conv 9.5e-7, ConvTranspose 4.8e-7, LSTM->CPU runs with cudnnCreate skipped).
 
-## What remains for the full RAM win (Phase 2 cont.)
+## Status: the ops are done — what remains
 
-The PoC proves convolution works without cuDNN. To actually **drop cuDNN from the binary** (the
-~782 MB saving), the CUDA EP's other cuDNN ops used by these models must also go cuDNN-free, then
-cuDNN must be unlinked:
+Conv, ConvTranspose, Softmax (already custom), and RNN/GRU/LSTM (→ CPU) are all handled, so the
+CUDA EP runs SenseVoice / melo8k / silero with **no cuDNN op** and `cudnnCreate` skipped — cuDNN is
+never *loaded* into RAM (the measured win). Two items remain, both small / off-box:
 
-| Op | Used by | cuDNN-free approach |
-|---|---|---|
-| **Softmax** | SenseVoice attention | custom reduction kernel (simple) |
-| **Pooling** | minor | custom max/avg kernel |
-| **LSTM** | silero-VAD | cuBLAS gates + elementwise, or run on CPU EP |
-| **ConvTranspose** | melo8k | col2im + cuBLAS (mirror of this conv) |
+1. **Unlink cuDNN from the binary.** Right now cuDNN is still *linked* (the unused RNN/BN/Pool/LRN
+   op sources still reference it), just never loaded. To also drop it from disk/`NEEDED`, exclude
+   those op sources under the option (à la `USE_CUDA_MINIMAL`, but keeping cuBLAS). Not required for
+   the RAM win — RSS only counts faulted-in pages — but tidier.
+2. **On-device gross-RSS measurement.** On the real Nano (small CUDA-10.2 context) the ~782 MB
+   delta shows up directly in total RSS; on the GB10 its ~1 GB CUDA-13 context masks it, which is
+   why the win was measured per-library (above).
 
-Then build the CUDA EP with cuDNN stubbed/unlinked and re-measure RSS (expect to approach the
-RapidSpeech cuBLAS-only ~0.76 GB rather than the ~1.5–2 GB cuDNN path).
-
-Reproduce: apply the patch to onnxruntime v1.23.1, build the CUDA EP with
-`-DCMAKE_CXX_FLAGS=-DORT_CUDA_NO_CUDNN_CONV`, run the validator in `patches/` notes.
+Reproduce: apply `patches/onnxruntime-cudnn-free-cuda.patch` to onnxruntime v1.23.1, build the CUDA
+EP with `-Donnxruntime_CUDA_NO_CUDNN=ON`, and run `patches/ort_conv_test.cc <model.onnx>` to compare
+CUDA (cuDNN-free) vs CPU.

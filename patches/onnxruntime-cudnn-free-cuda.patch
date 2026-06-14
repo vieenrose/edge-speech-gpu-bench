@@ -1,3 +1,30 @@
+diff --git a/cmake/CMakeLists.txt b/cmake/CMakeLists.txt
+index baf2174..7f68a44 100644
+--- a/cmake/CMakeLists.txt
++++ b/cmake/CMakeLists.txt
+@@ -73,6 +73,7 @@ cmake_dependent_option(onnxruntime_ENABLE_CUDA_EP_INTERNAL_TESTS "Build with CUD
+ 
+ cmake_dependent_option(onnxruntime_USE_CUDA_NHWC_OPS "Build CUDA with NHWC op support" ON "onnxruntime_USE_CUDA" OFF)
+ option(onnxruntime_CUDA_MINIMAL "Build CUDA without any operations apart from memcpy ops. Usefuel for a very minial TRT build" OFF)
++option(onnxruntime_CUDA_NO_CUDNN "Build the CUDA EP cuDNN-free (cuBLAS-only Conv/ConvTranspose, RNN->CPU, skip cudnnCreate). For low-RAM devices e.g. Jetson Nano gen1." OFF)
+ option(onnxruntime_ENABLE_CUDA_LINE_NUMBER_INFO "When building with CUDA support, generate device code line number information." OFF)
+ option(onnxruntime_USE_OPENVINO "Build with OpenVINO support" OFF)
+ option(onnxruntime_USE_COREML "Build with CoreML support" OFF)
+diff --git a/cmake/onnxruntime_providers_cuda.cmake b/cmake/onnxruntime_providers_cuda.cmake
+index 91707c4..4aa3453 100644
+--- a/cmake/onnxruntime_providers_cuda.cmake
++++ b/cmake/onnxruntime_providers_cuda.cmake
+@@ -225,6 +225,10 @@
+     endif()
+ 
+     add_dependencies(${target} onnxruntime_providers_shared ${onnxruntime_EXTERNAL_DEPENDENCIES})
++    if(onnxruntime_CUDA_NO_CUDNN)
++      # cuBLAS-only CUDA EP: cuDNN-free Conv/ConvTranspose, RNN/GRU/LSTM -> CPU EP, skip cudnnCreate.
++      target_compile_definitions(${target} PRIVATE ORT_CUDA_NO_CUDNN ORT_CUDA_NO_CUDNN_CONV)
++    endif()
+     if(onnxruntime_CUDA_MINIMAL)
+       target_compile_definitions(${target} PRIVATE USE_CUDA_MINIMAL)
+       target_link_libraries(${target} PRIVATE ${ABSEIL_LIBS} ${ONNXRUNTIME_PROVIDERS_SHARED} Boost::mp11 safeint_interface CUDA::cudart)
 diff --git a/onnxruntime/core/providers/cuda/cuda_execution_provider.cc b/onnxruntime/core/providers/cuda/cuda_execution_provider.cc
 index e036c77..c869dae 100644
 --- a/onnxruntime/core/providers/cuda/cuda_execution_provider.cc
