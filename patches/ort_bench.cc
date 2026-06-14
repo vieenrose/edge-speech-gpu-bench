@@ -23,6 +23,9 @@ int main(int argc, char** argv) {
   const char* model = argv[1]; const char* name = argv[2];
   Ort::Env env(ORT_LOGGING_LEVEL_ERROR, "bench");
   Ort::SessionOptions so; so.SetIntraOpNumThreads(4);
+  // ENABLE_BASIC keeps Level-1 opts but skips the Level-2 ConvActivationFusion, so the
+  // cuDNN-free standard Conv is used instead of the cuDNN-only FusedConv.
+  so.SetGraphOptimizationLevel(ORT_ENABLE_BASIC);
   OrtCUDAProviderOptions cu; memset(&cu, 0, sizeof cu); cu.device_id = 0;
   cu.gpu_mem_limit = (size_t)2 * 1024 * 1024 * 1024;  // cap arena (GB10's 128GB UMA overflows ORT-1.11 math)
   cu.arena_extend_strategy = 1;                       // kSameAsRequested (avoid next-pow2 of huge size)
@@ -45,7 +48,8 @@ int main(int argc, char** argv) {
   std::vector<std::vector<int64_t>> i64buf(nin);
   std::vector<std::vector<int32_t>> i32buf(nin);
   for (size_t i = 0; i < nin; i++) {
-    auto ti = sess.GetInputTypeInfo(i).GetTensorTypeAndShapeInfo();
+    Ort::TypeInfo tinfo = sess.GetInputTypeInfo(i);  // keep alive: GetTensorTypeAndShapeInfo is a view
+    auto ti = tinfo.GetTensorTypeAndShapeInfo();
     auto shape = ti.GetShape();
     for (size_t k = 0; k < shape.size(); k++)
       if (shape[k] < 0) shape[k] = (k == 0) ? 1 : SEQ;  // batch->1, other dynamic (seq)->SEQ

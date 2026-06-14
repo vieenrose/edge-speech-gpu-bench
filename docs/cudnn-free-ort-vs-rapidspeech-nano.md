@@ -1,47 +1,57 @@
 # cuDNN-free ORT 1.11.0 vs RapidSpeech — Jetson Nano gen1 (in JetPack/CUDA-10.2 container)
 
-Comparative benchmark of the two **Nano-dedicated, cuDNN-free CUDA builds**, run in the
-`l4t r32.7` / CUDA-10.2 container on the DGX Spark (cc spoofed to sm_53). Models: SenseVoice,
-X-ASR-480ms (onnx-only), melo8k, silero-VAD, TEN-VAD (onnx-only).
+Comparative benchmark of the two **Nano-dedicated, cuDNN-free CUDA builds**, in the `l4t r32.7` /
+CUDA-10.2 container on the DGX Spark (cc → sm_53 via PTX-JIT). Models: SenseVoice, X-ASR-480ms
+(onnx-only), melo8k, silero-VAD, TEN-VAD (onnx-only).
 
-## Result: the comparison itself is the finding
+> **Correction:** an earlier draft claimed ORT 1.11 "can't run" these models due to an integer
+> overflow. That overflow was a **bug in the benchmark harness** (a dangling `Ort::TypeInfo` →
+> garbage shape passed to `CreateTensor`), not ORT. With it fixed, the cuDNN-free ORT 1.11.0 runs
+> most models. Numbers below are the corrected, real measurements.
 
-| Model | RapidSpeech CUDA (ggml, cuDNN-free) | cuDNN-free ORT **1.11.0** CUDA |
+## Results (peak RSS + warm time)
+
+| Model | RapidSpeech CUDA (ggml) | cuDNN-free ORT **1.11.0** CUDA |
 |---|---|---|
-| **SenseVoice** | ✅ runs, **761 MB** peak RSS | ❌ ORT-1.11 **integer overflow at inference** |
-| **silero-VAD** | ✅ runs (in the 761 MB ASR pipeline) | ❌ ORT-1.11 integer overflow |
-| **melo8k** | ✅ runs, **776 MB**, GPU==CPU (0.999999) | ❌ **opset 17** (LayerNormalization) — rejected at load, won't downgrade |
-| **X-ASR-480ms** | n/a (onnx-only) | ❌ ORT-1.11 integer overflow |
-| **TEN-VAD** | n/a (onnx-only) | ❌ ORT-1.11 integer overflow |
+| **SenseVoice** | **761 MB** | ✅ 383 ms / **1445 MB** |
+| **silero-VAD** | ~in ASR pipeline | ✅ 2.5 ms / **569 MB** |
+| **X-ASR-enc** (480ms) | n/a (onnx-only) | ✅ 324 ms / **1205 MB** |
+| **melo8k** | **776 MB**, GPU==CPU | ❌ **opset 17** (LayerNormalization) — ORT 1.11 ceiling |
+| **TEN-VAD** | n/a (onnx-only) | ❌ Conv→cuDNN holdout (FusedConv / asymmetric-pad conv) |
 
-**RapidSpeech runs everything at ~760–780 MB. The cuDNN-free ORT *builds* but cannot *run* the
-modern sherpa models on ORT 1.11** — and ORT 1.11 is the **only** version that supports the Nano's
-CUDA 10.2 (newer ORT needs CUDA 11+/12; csukuangfj's last CUDA-10.2 aarch64 GPU build is 1.11.0).
+*(RSS is GB10-inflated: the box's ~1 GB CUDA-13 context dominates and masks the cuDNN saving — see
+`cudnn-free-ort-conv.md`. On a real 4 GB Nano with the small CUDA-10.2 context, absolute numbers are
+much lower; the **relative** picture holds.)*
 
-## Why ORT 1.11 can't run them (two independent walls)
+## What it took to get ORT models running cuDNN-free
 
-1. **Opset ceiling — melo8k.** Exported at **opset 17** (uses `LayerNormalization`, new in 17).
-   ORT 1.11 caps at opset 16 and rejects it at load. `onnx.version_converter` 17→16 **fails**:
-   *"No Previous Version of LayerNormalization exists"* — so it needs **op decomposition**, not a
-   version bump.
-2. **Runtime integer overflow — SenseVoice / silero / X-ASR / TEN-VAD.** These are opset 13 (within
-   the ceiling) and **load** fine, but **overflow at inference** in ORT 1.11's core (`safeint.h`,
-   `SafeIntOnOverflow`) — on **both CPU and CUDA EPs**, so it is **not** the cuDNN-free CUDA EP.
-   The same models + identical inputs run fine on **modern ORT (1.25)** → it's an ORT-1.11-vs-recent-
-   export incompatibility, fixable only by patching ORT 1.11 or re-exporting each model.
+ORT's CUDA EP is **deeply cuDNN-coupled** — many op families call cuDNN, not just Conv. Getting each
+model to run cuDNN-free was whack-a-mole, each op routed/replaced under `-Donnxruntime_CUDA_NO_CUDNN`:
 
-## What this means for the deployment target
+| cuDNN op family | How handled | Unblocked |
+|---|---|---|
+| Conv / ConvTranspose | im2col / col2im + cuBLAS (replaced) | SenseVoice |
+| Softmax | ORT already has custom kernels | — |
+| RNN / GRU / LSTM | route to CPU EP | silero |
+| **Pooling** (`cudnnPoolingForward`) | route to CPU EP | (TEN-VAD partial) |
+| **Reduce*** (`cudnnReduceTensor`) | route to CPU EP | **X-ASR** |
+| **FusedConv** (conv+act fusion) | disable fusion (`ORT_ENABLE_BASIC`) | silero |
+| Conv via cuDNN algo-search (asym-pad / FusedConv) | **TEN-VAD still blocked** | — |
 
-- The **cuDNN-free CUDA EP for onnxruntime is real and builds** under CUDA 10.2 (see
-  `cudnn-free-ort-conv.md`; fork `vieenrose/onnxruntime`). The engineering works.
-- But **ORT 1.11 — the only CUDA-10.2 ORT — is too old to *run* today's speech models** without
-  per-model surgery (opset downgrade/decomposition) **and** fixing ORT-1.11 runtime overflows.
-- **RapidSpeech.cpp (ggml) sidesteps both**: it reimplements the architecture in C++ (no ONNX opset
-  ceiling, no ORT runtime), runs all the models cuDNN-free at ~0.76 GB, and is the practical Nano path.
+## Takeaways for the deployment target
 
-**Bottom line:** for cuDNN-free CUDA on the Jetson Nano gen1, **RapidSpeech is the viable engine**;
-the cuDNN-free ORT fork is a valid technique but is gated by ORT 1.11's age, not by cuDNN.
+- The **cuDNN-free CUDA EP works** — SenseVoice, silero, and the X-ASR streaming zipformer all run
+  on ORT 1.11.0 (CUDA 10.2) with **no cuDNN**.
+- But two real walls remain: **melo8k** needs **opset-16 decomposition** (LayerNormalization isn't in
+  16), and **TEN-VAD** has a conv path that still reaches cuDNN (FusedConv / asymmetric-pad — needs a
+  FusedConv patch or post-slice handling). And the per-op whack-a-mole shows how cuDNN-coupled ORT is.
+- **On RAM, ggml/RapidSpeech wins clearly**: SenseVoice **761 MB** vs ORT **1445 MB** on the same box
+  — even cuDNN-free, ORT's framework/arena overhead roughly doubles ggml's footprint.
+- **RapidSpeech runs all three of its models** (SenseVoice/silero/melo8k) at ~0.76 GB, with **no opset
+  ceiling and no per-op cuDNN surgery**.
 
-(Measured in-container on the GB10 via PTX-JIT; the overflow is ORT-1.11 core, reproduced on CPU EP
-too. Absolute RapidSpeech RSS on a real 4 GB Nano will differ from the GB10's, but the *relative*
-picture — RapidSpeech runs, ORT 1.11 can't — is hardware-independent.)
+**Bottom line:** the cuDNN-free ORT 1.11 fork is a viable, now-working technique (the overflow was a
+harness bug), but for the Nano gen1 it's lower-RAM-efficient and higher-friction than RapidSpeech —
+opset ceiling (melo8k), residual cuDNN ops (TEN-VAD), and ~2× the RAM. **RapidSpeech remains the
+better cuDNN-free Nano engine**; the ORT fork is the right choice only when you specifically need
+ORT's ecosystem and your models are opset-16-clean.
