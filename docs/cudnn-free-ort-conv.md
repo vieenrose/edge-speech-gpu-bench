@@ -7,8 +7,11 @@ of **onnxruntime's CUDA EP**, not of sherpa-onnx itself.
 
 ## What was done (PoC — validated)
 
-Lives as a fork branch: **[`vieenrose/onnxruntime@cudnn-free-cuda-conv-jetson`](https://github.com/vieenrose/onnxruntime/tree/cudnn-free-cuda-conv-jetson)**
-(off onnxruntime `v1.23.1`, commit `af7c2c8`). The same diff is mirrored here as
+Lives as a fork branch: **[`vieenrose/onnxruntime@cudnn-free-cuda-ep`](https://github.com/vieenrose/onnxruntime/tree/cudnn-free-cuda-ep)**
+(off onnxruntime `v1.23.1`, commit `af7c2c8`) — the **reference implementation on modern ORT
+(CUDA 12/13)**. The deployable **Jetson Nano gen1 / CUDA-10.2** port is on the
+**[`cudnn-free-cuda-jetson-nano-gen1`](https://github.com/vieenrose/onnxruntime/tree/cudnn-free-cuda-jetson-nano-gen1)**
+branch (onnxruntime `v1.11.0`, the last release supporting the Nano's GPU). The same diff is mirrored here as
 `patches/onnxruntime-cudnn-free-conv.patch`. It replaces `cudnnConvolutionForward`
 for the `Conv` op with **im2col + cuBLAS GEMM**:
 
@@ -61,7 +64,7 @@ Skipping `cudnnCreate` + the cuDNN-free Conv is exactly what avoids it. (Absolut
 the GB10 is dominated by the ~1 GB CUDA-13 context, which masks this in a gross RSS number — hence
 the per-library measurement; on the Nano's small CUDA-10.2 context the cuDNN delta dominates.)
 
-Fork: **[`vieenrose/onnxruntime@cudnn-free-cuda-conv-jetson`](https://github.com/vieenrose/onnxruntime/tree/cudnn-free-cuda-conv-jetson)**
+Fork: **[`vieenrose/onnxruntime@cudnn-free-cuda-ep`](https://github.com/vieenrose/onnxruntime/tree/cudnn-free-cuda-ep)**
 (commit `885c0ad`); mirror `patches/onnxruntime-cudnn-free-cuda.patch`.
 
 ## Coverage: all three target models are now cuDNN-free
