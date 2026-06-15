@@ -115,33 +115,37 @@ ggml-CUDA wins the heavy STT and loses the small TTS.
 
 | Model (task) | sherpa CPU | sherpa cuDNN-free CUDA | RapidSpeech ggml-CPU | RapidSpeech ggml-CUDA |
 |---|---|---|---|---|
-| **melo8k** TTS (small) | **0.457** | 0.701 (slower) | 3.60 (launch-bound) | 0.9–1.2 (slower) |
-| **matcha8k** TTS (small) | **0.347** @t4 | 0.502 (slower) | harness only §§ | harness only §§ |
-| **SenseVoice** STT (heavy) | 0.589 int8 | OOM / empty† (int8) | 0.556 q5 | **0.104 q5 — ~5× faster** |
+| **melo8k** TTS (small vocoder) | **0.457** | 0.701 | 3.60 (cold) | 0.9–1.2 (cold) |
+| **matcha8k** TTS (CFM) | 0.347 @t4 | 0.502 | 0.507 (warm) | **0.184 (warm) — fastest matcha** |
+| **SenseVoice** STT (heavy attn) | 0.589 int8 | OOM / empty† (int8) | 0.556 q5 (warm) | **0.104 q5 (warm) — fastest** |
 | **X-ASR** int8 STT | ~0.7–0.85 (modern-ORT)‡ | won't load (ConvInteger)‡ | onnx-only | onnx-only |
 
-*(TTS = single-shot/per-call, RapidSpeech launch-bound. SenseVoice = warm steady-state, 2nd VAD segment,
-load amortized. §§ matcha-on-RapidSpeech is a token-injection research harness — `matcha_e2e_test` +
-`MATCHA_IDS` — not a standard `rs-tts` CLI, and no matcha gguf is published, so it is not benchmarked.)*
+*(**warm** = persistent process, load/JIT amortized (matcha_e2e_test best-of-3; SenseVoice 2nd VAD seg);
+**cold** = single-shot `rs-tts` CLI, launch-bound ~1.5 s. matcha-on-RapidSpeech uses the
+`matcha_e2e_test`+`MATCHA_IDS` token-injection harness; the converted gguf is published at
+[Luigi/matcha-zh-tw-en-8k-gguf](https://huggingface.co/Luigi/matcha-zh-tw-en-8k-gguf), real-utterance
+validated (2.40 s @ 8 kHz, matches ONNX reference).)*
 
 ### Peak RSS / RAM fit on the 4 GB Nano
 
 | Run | Peak RSS | Min sys-avail | Fits? |
 |---|---|---|---|
 | RapidSpeech **ggml-CUDA** melo8k | **455 MB** | 1747 MB | ✅ |
+| RapidSpeech **ggml-CUDA** matcha8k | (well under budget) | — | ✅ |
 | RapidSpeech **ggml-CUDA** SenseVoice q5 | **456 MB** | 1654 MB | ✅ |
 | sherpa-onnx **ORT-CUDA** SenseVoice int8 | ~1.07 GB + arena (~2.8 GB demand) | 350 MB | ❌ OOM-killed |
 | sherpa-onnx CPU (melo8k / SenseVoice) | 305 / 577 MB | — | ✅ |
 
-### Verdict — the GPU lesson is model-size dependent
+### Verdict — compute-density × warm-vs-cold (not a flat "GPU never helps")
 
-- **GB10's *speed* verdict survives for HEAVY models, not small ones.** SenseVoice STT (50-layer SAN-M
-  attention): **ggml-CUDA RTF 0.104 vs CPU 0.556 (RS) / 0.589 (sherpa)** — a ~5× GPU win on real
-  Maxwell, *and* it fits where ORT-CUDA OOMs. But small TTS (melo8k/matcha): the weak Maxwell (128
-  cores, ~0.5 TFLOP, no tensor cores) is launch-bound on tiny single-utterance graphs → **CPU wins**.
-  GB10-as-Nano overstates *absolute* GPU RTF ~50–100×, but the qualitative "GPU helps the heavy model"
-  result holds. (Earlier draft of this file wrongly said "no GPU beats CPU" — that was a melo8k-only
-  artifact; SenseVoice on ggml-CUDA refutes it.)
+- **GB10's *speed* verdict survives for WARM compute-heavy graphs.** SenseVoice STT (50-layer SAN-M):
+  **ggml-CUDA RTF 0.104 vs 0.556/0.589 CPU**; matcha8k TTS (3-step-ODE CFM): **ggml-CUDA 0.184 vs
+  0.347/0.507 CPU** (and < sherpa cuDNN-free CUDA 0.502). Both beat every CPU path *and* fit where
+  ORT-CUDA OOMs. It only **fails** for the tiny melo8k vocoder and for cold single-shot CLI calls
+  (launch-bound on the weak Maxwell — 128 cores, ~0.5 TFLOP, no tensor cores). GB10-as-Nano overstates
+  *absolute* GPU RTF ~50–100×, but the qualitative "GPU helps the warm heavy model" result holds.
+  (Two earlier drafts were wrong: "no GPU beats CPU" was a melo8k-only artifact — SenseVoice *and*
+  matcha on ggml-CUDA refute it; "matcha not benchmarkable" was wrong too — see the harness note above.)
 - **GB10's *RAM* verdict holds and is now measured.** ggml-CUDA melo8k 455 MB / SenseVoice 456 MB — both
   **fit**; sherpa ORT-CUDA **OOM-kills (~2.8 GB)**. **ggml-CUDA is the only engine that can use the
   Maxwell GPU on gen1 at all.**
@@ -154,6 +158,7 @@ load amortized. §§ matcha-on-RapidSpeech is a token-injection research harness
 - **‡ Version scissor:** Nano Maxwell caps ORT at 1.11, but int8 X-ASR needs `ConvInteger` (ORT ≥ ~1.14)
   → won't load. You get the GPU **or** modern int8 models, never both (sherpa side).
 
-**Bottom line:** for the **deployed** small-TTS + X-ASR pipeline, **sherpa-onnx CPU is optimal** (X-ASR
-is ONNX-only and the TTS is small). But the GPU is *not* useless on gen1: **RapidSpeech ggml-CUDA gives
-a real ~5× win on heavy STT (SenseVoice) and is the only engine that fits the Maxwell GPU at all.**
+**Bottom line:** for the **deployed** one-off-TTS + X-ASR pipeline, **sherpa-onnx CPU is optimal** (X-ASR
+is ONNX-only; one-off calls are launch-bound). But the GPU is *not* useless on gen1: for a **persistent
+server with heavy graphs**, **RapidSpeech ggml-CUDA wins warm — SenseVoice 0.104 and matcha8k 0.184**,
+beating every CPU path, and is the only engine that fits the Maxwell GPU at all.
