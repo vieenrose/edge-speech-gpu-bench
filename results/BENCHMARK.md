@@ -92,3 +92,49 @@ CUDA EP (`--provider=cuda`, `GraphOptimizationLevel=1`, `--tts-silence-scale=1`)
 ## Blockers (see `BLOCKERS.md`)
 - **sherpa-onnx CUDA:** no prebuilt path on GB10/CUDA-13; from-source onnxruntime build (CUDA-13
   CUTLASS/cccl fixes applied) — the CUDA provider was still compiling when this was written.
+
+---
+
+## Real Jetson Nano gen1 (sm_53 Maxwell) — the device, not the GB10 proxy (2026-06-15)
+
+All numbers above are **GB10** (sm_53 SASS JIT'd onto a Blackwell GPU) — relative only. The deployment
+device is now measured. Engines **x86-cross-compiled** for CUDA-10.2 / gcc-8.3, run on real sm_53 under
+the live product stack. Numbers are **single-shot / per-call** (the deployment pattern); RapidSpeech is
+**launch-bound** (~1.5 s wall dominated by model-load + first-graph compile).
+
+### RTF (lower is better) — real Nano gen1
+
+| Model (task) | sherpa CPU | sherpa cuDNN-free CUDA | RapidSpeech ggml-CPU | RapidSpeech ggml-CUDA |
+|---|---|---|---|---|
+| **melo8k** TTS | **0.457** | 0.701 (slower) | 3.60 (launch-bound) | 0.9–1.2 (launch-bound) |
+| **matcha8k** TTS | **0.347** @t4 | 0.502 (slower) | — | — |
+| **SenseVoice** int8 STT | **0.589** | OOM / empty† | — | — |
+| **X-ASR** int8 STT | ~0.7–0.85 (modern-ORT)‡ | won't load (ConvInteger)‡ | — | — |
+
+### Peak RSS / RAM fit on the 4 GB Nano
+
+| Run | Peak RSS | Min sys-avail | Fits? |
+|---|---|---|---|
+| RapidSpeech **ggml-CUDA** melo8k | **455 MB** | 1747 MB | ✅ |
+| sherpa-onnx **ORT-CUDA** SenseVoice | ~1.07 GB + arena (~2.8 GB demand) | 350 MB | ❌ OOM-killed |
+| sherpa-onnx CPU (melo8k / SenseVoice) | 305 / 577 MB | — | ✅ |
+
+### Verdict — real silicon flips the GPU lesson
+
+- **The GB10's *speed* verdict does NOT survive real Maxwell.** On GB10, ggml-CUDA beat sherpa-CPU
+  (melo8k 0.0107 < 0.0209). On the real Nano, **every GPU path is slower than or equal to sherpa
+  CPU** — the Maxwell (128 cores, ~0.5 TFLOP, no tensor cores) is too weak, and cuDNN-free / launch-
+  bound paths don't amortize on small single-utterance graphs. GB10-as-Nano overstates GPU ~50–100×.
+- **The GB10's *RAM* verdict holds and is now measured.** ggml-CUDA melo8k peaks at **455 MB and
+  fits**; sherpa ORT-CUDA **OOM-kills (~2.8 GB)**. **ggml-CUDA is the only engine that can use the
+  Maxwell GPU on gen1 at all** — but it offers no speedup.
+- **cuDNN-free EP bug exposed only without cuDNN:** `CudnnFilterDescriptor` ctor called
+  `cudnnCreateFilterDescriptor` → SIGABRT at session init on the real Nano (GB10 had cuDNN present).
+  Fixed (guard under `ORT_CUDA_NO_CUDNN`), pushed to the onnxruntime fork.
+- **† SenseVoice int8 + ORT-CUDA** is structurally a dead end (281 `MatMulInteger` → CPU EP, fragmented
+  graph, empty output, CPU-bound). fp32 SenseVoice (937 MB) doesn't fit 4 GB.
+- **‡ Version scissor:** Nano Maxwell caps ORT at 1.11, but int8 X-ASR needs `ConvInteger` (ORT ≥ ~1.14)
+  → won't load. You get the GPU **or** modern int8 models, never both.
+
+**Bottom line: sherpa-onnx CPU wins every row on the real device.** The deployed CPU path is optimal,
+not merely safe — proven from both engines, both backends, on real Maxwell.
