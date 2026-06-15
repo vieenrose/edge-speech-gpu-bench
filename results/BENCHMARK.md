@@ -54,12 +54,14 @@ CUDA EP (`--provider=cuda`, `GraphOptimizationLevel=1`, `--tts-silence-scale=1`)
 |---|---|---|---|---|
 | RapidSpeech ggml **CPU** | 87 ms | 2.40 s | 0.036 | **154 MB** |
 | RapidSpeech ggml **CUDA** | **26 ms** | 2.40 s | **0.011** | 579 MB |
+| sherpa-onnx **CPU** | 64 ms | 1.88 s | 0.034 | 201 MB |
 | sherpa-onnx **cuDNN-free CUDA** | 55 ms | 1.88 s | 0.029 | 667 MB |
 
 - For identical token input the **ggml CUDA path (26 ms) is ~2.1× faster** than sherpa-onnx's cuDNN-free
-  CUDA (55 ms), at **~1.2× lower RSS** (579 vs 667 MB). ggml CPU is leanest at **154 MB**. This *flips* the
-  small-model verdict (where sherpa-onnx/ORT wins): the deep 3-step-ODE CFM decoder favors ggml's
-  hand-written graph.
+  CUDA (55 ms), at **~1.2× lower RSS** (579 vs 667 MB). ggml CPU is leanest at **154 MB**. On **CPU** the
+  usual order holds (sherpa 64 ms vs ggml 87 ms — ORT's CPU kernels win), so it's specifically **CUDA**
+  where ggml *flips* the small-model verdict: the deep 3-step-ODE CFM decoder favors ggml's hand-written
+  graph.
 - **Output-length caveat (honest):** the two runtimes disagree on synthesized length for the same tokens —
   ggml's duration regulator matches host ONNX Runtime (~150 mel frames → 2.40 s); the deployment ORT 1.11
   runtime sherpa links yields ~118 frames → 1.88 s. Both vocoders read `n_fft=512 hop=128`, so this is an

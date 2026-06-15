@@ -18,7 +18,7 @@ aarch64, sm_121, CUDA 13, 128 GB unified memory). Compares, on the same models a
 |---|---|---|---|---|---|
 | SenseVoice STT | 0.0102 | 0.079 † | 0.0739 | **0.0031** | 0.0031 |
 | melo8k TTS | 0.0209 | 0.028 † | 0.0657 | **0.0107** | 0.0245 |
-| **Matcha-TTS** ‡‡ | — | 0.029 ‡‡ | 0.036 | **0.011** | — |
+| **Matcha-TTS** ‡‡ | 0.034 | 0.029 ‡‡ | 0.036 | **0.011** | — |
 | silero-VAD | **0.0023** | — | 0.0055 | 0.0057 | 0.0413 |
 
 - **CPU:** sherpa-onnx wins (6–7× on STT/TTS).
@@ -114,10 +114,13 @@ sherpa's own per-call generation timer (model already loaded):
 |---|---|---|---|---|
 | RapidSpeech ggml **CPU** | 87 ms | 2.40 s | 0.036 | **154 MB** |
 | RapidSpeech ggml **CUDA** | **26 ms** | 2.40 s | **0.011** | 579 MB |
+| sherpa-onnx **CPU** | 64 ms | 1.88 s | 0.034 | 201 MB |
 | sherpa-onnx **cuDNN-free CUDA** | 55 ms | 1.88 s | 0.029 | 667 MB |
 
 For identical token input the **ggml CUDA path (26 ms) is ~2.1× faster than sherpa-onnx's cuDNN-free CUDA
-(55 ms)** and ~1.2× lighter (579 vs 667 MB); ggml CPU is the leanest at **154 MB**. Per audio-second the
+(55 ms)** and ~1.2× lighter (579 vs 667 MB); ggml CPU is the leanest at **154 MB**. On **CPU** the usual
+order holds (sherpa 64 ms vs ggml 87 ms — ORT's CPU kernels are faster), so it's CUDA where the ggml port
+pulls decisively ahead. Per audio-second the
 gap is wider still (ggml CUDA does ~28 % more frames). **One honest caveat:** the two runtimes disagree on
 the synthesized *length* for the same tokens — ggml's duration regulator matches host ONNX Runtime (~150
 mel frames → 2.40 s), whereas the deployment **ORT 1.11** runtime sherpa links yields ~118 frames → 1.88 s.
