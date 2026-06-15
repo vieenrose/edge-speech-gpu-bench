@@ -106,42 +106,54 @@ CUDA EP (`--provider=cuda`, `GraphOptimizationLevel=1`, `--tts-silence-scale=1`)
 
 All numbers above are **GB10** (sm_53 SASS JIT'd onto a Blackwell GPU) — relative only. The deployment
 device is now measured. Engines **x86-cross-compiled** for CUDA-10.2 / gcc-8.3, run on real sm_53 under
-the live product stack. Numbers are **single-shot / per-call** (the deployment pattern); RapidSpeech is
-**launch-bound** (~1.5 s wall dominated by model-load + first-graph compile).
+the live product stack. TTS numbers are **single-shot / per-call** (RapidSpeech is **launch-bound** —
+~1.5 s wall ≈ model-load + first-graph compile); the SenseVoice STT numbers are **warm steady-state**
+(load amortized over a multi-segment clip). The headline: the GPU verdict is **model-size dependent** —
+ggml-CUDA wins the heavy STT and loses the small TTS.
 
 ### RTF (lower is better) — real Nano gen1
 
 | Model (task) | sherpa CPU | sherpa cuDNN-free CUDA | RapidSpeech ggml-CPU | RapidSpeech ggml-CUDA |
 |---|---|---|---|---|
-| **melo8k** TTS | **0.457** | 0.701 (slower) | 3.60 (launch-bound) | 0.9–1.2 (launch-bound) |
-| **matcha8k** TTS | **0.347** @t4 | 0.502 (slower) | — | — |
-| **SenseVoice** int8 STT | **0.589** | OOM / empty† | — | — |
-| **X-ASR** int8 STT | ~0.7–0.85 (modern-ORT)‡ | won't load (ConvInteger)‡ | — | — |
+| **melo8k** TTS (small) | **0.457** | 0.701 (slower) | 3.60 (launch-bound) | 0.9–1.2 (slower) |
+| **matcha8k** TTS (small) | **0.347** @t4 | 0.502 (slower) | harness only §§ | harness only §§ |
+| **SenseVoice** STT (heavy) | 0.589 int8 | OOM / empty† (int8) | 0.556 q5 | **0.104 q5 — ~5× faster** |
+| **X-ASR** int8 STT | ~0.7–0.85 (modern-ORT)‡ | won't load (ConvInteger)‡ | onnx-only | onnx-only |
+
+*(TTS = single-shot/per-call, RapidSpeech launch-bound. SenseVoice = warm steady-state, 2nd VAD segment,
+load amortized. §§ matcha-on-RapidSpeech is a token-injection research harness — `matcha_e2e_test` +
+`MATCHA_IDS` — not a standard `rs-tts` CLI, and no matcha gguf is published, so it is not benchmarked.)*
 
 ### Peak RSS / RAM fit on the 4 GB Nano
 
 | Run | Peak RSS | Min sys-avail | Fits? |
 |---|---|---|---|
 | RapidSpeech **ggml-CUDA** melo8k | **455 MB** | 1747 MB | ✅ |
-| sherpa-onnx **ORT-CUDA** SenseVoice | ~1.07 GB + arena (~2.8 GB demand) | 350 MB | ❌ OOM-killed |
+| RapidSpeech **ggml-CUDA** SenseVoice q5 | **456 MB** | 1654 MB | ✅ |
+| sherpa-onnx **ORT-CUDA** SenseVoice int8 | ~1.07 GB + arena (~2.8 GB demand) | 350 MB | ❌ OOM-killed |
 | sherpa-onnx CPU (melo8k / SenseVoice) | 305 / 577 MB | — | ✅ |
 
-### Verdict — real silicon flips the GPU lesson
+### Verdict — the GPU lesson is model-size dependent
 
-- **The GB10's *speed* verdict does NOT survive real Maxwell.** On GB10, ggml-CUDA beat sherpa-CPU
-  (melo8k 0.0107 < 0.0209). On the real Nano, **every GPU path is slower than or equal to sherpa
-  CPU** — the Maxwell (128 cores, ~0.5 TFLOP, no tensor cores) is too weak, and cuDNN-free / launch-
-  bound paths don't amortize on small single-utterance graphs. GB10-as-Nano overstates GPU ~50–100×.
-- **The GB10's *RAM* verdict holds and is now measured.** ggml-CUDA melo8k peaks at **455 MB and
-  fits**; sherpa ORT-CUDA **OOM-kills (~2.8 GB)**. **ggml-CUDA is the only engine that can use the
-  Maxwell GPU on gen1 at all** — but it offers no speedup.
+- **GB10's *speed* verdict survives for HEAVY models, not small ones.** SenseVoice STT (50-layer SAN-M
+  attention): **ggml-CUDA RTF 0.104 vs CPU 0.556 (RS) / 0.589 (sherpa)** — a ~5× GPU win on real
+  Maxwell, *and* it fits where ORT-CUDA OOMs. But small TTS (melo8k/matcha): the weak Maxwell (128
+  cores, ~0.5 TFLOP, no tensor cores) is launch-bound on tiny single-utterance graphs → **CPU wins**.
+  GB10-as-Nano overstates *absolute* GPU RTF ~50–100×, but the qualitative "GPU helps the heavy model"
+  result holds. (Earlier draft of this file wrongly said "no GPU beats CPU" — that was a melo8k-only
+  artifact; SenseVoice on ggml-CUDA refutes it.)
+- **GB10's *RAM* verdict holds and is now measured.** ggml-CUDA melo8k 455 MB / SenseVoice 456 MB — both
+  **fit**; sherpa ORT-CUDA **OOM-kills (~2.8 GB)**. **ggml-CUDA is the only engine that can use the
+  Maxwell GPU on gen1 at all.**
 - **cuDNN-free EP bug exposed only without cuDNN:** `CudnnFilterDescriptor` ctor called
   `cudnnCreateFilterDescriptor` → SIGABRT at session init on the real Nano (GB10 had cuDNN present).
   Fixed (guard under `ORT_CUDA_NO_CUDNN`), pushed to the onnxruntime fork.
-- **† SenseVoice int8 + ORT-CUDA** is structurally a dead end (281 `MatMulInteger` → CPU EP, fragmented
-  graph, empty output, CPU-bound). fp32 SenseVoice (937 MB) doesn't fit 4 GB.
+- **† SenseVoice int8 + sherpa ORT-CUDA** is a dead end (281 `MatMulInteger` → CPU EP, fragmented graph,
+  empty output) — *but* RapidSpeech runs SenseVoice **q5 on ggml-CUDA** fine (the row above). fp32
+  SenseVoice (937 MB) doesn't fit 4 GB on either engine.
 - **‡ Version scissor:** Nano Maxwell caps ORT at 1.11, but int8 X-ASR needs `ConvInteger` (ORT ≥ ~1.14)
-  → won't load. You get the GPU **or** modern int8 models, never both.
+  → won't load. You get the GPU **or** modern int8 models, never both (sherpa side).
 
-**Bottom line: sherpa-onnx CPU wins every row on the real device.** The deployed CPU path is optimal,
-not merely safe — proven from both engines, both backends, on real Maxwell.
+**Bottom line:** for the **deployed** small-TTS + X-ASR pipeline, **sherpa-onnx CPU is optimal** (X-ASR
+is ONNX-only and the TTS is small). But the GPU is *not* useless on gen1: **RapidSpeech ggml-CUDA gives
+a real ~5× win on heavy STT (SenseVoice) and is the only engine that fits the Maxwell GPU at all.**
