@@ -40,6 +40,33 @@ calls are 6–250× faster. A per-process CLI re-pays that every call. GPU memor
 Vulkan **ties CUDA** on the bigger SenseVoice workload, lags ~2.3× on melo8k TTS, and *loses to
 CPU* on tiny silero-VAD — Vulkan's per-dispatch overhead dominates sub-millisecond models.
 
+## Matcha-TTS — same-utterance (ggml vs sherpa-onnx cuDNN-free CUDA)
+
+Matcha-TTS ([Luigi/matcha-zh-tw-en-8k](https://huggingface.co/Luigi/matcha-zh-tw-en-8k), CFM acoustic +
+Vocos vocoder, 8 kHz) ported from scratch to RapidSpeech.cpp ggml. Benchmarked **apples-to-apples**: the
+identical phoneme tokens are fed to both engines. Sentence `這個星期的研究進度。` → sherpa's matcha frontend
+emits `[2069, 614, 1886, 1397, 420, 1927, 829, 814, 489, 5]` (dumped with `--debug=1`), injected into the
+ggml e2e harness (`MATCHA_IDS=…`) so it synthesizes the exact same tokens. Warm = best-of-3 in a persistent
+ggml context / sherpa's per-call generation timer (model already loaded). sherpa on the cuDNN-free ORT 1.11
+CUDA EP (`--provider=cuda`, `GraphOptimizationLevel=1`, `--tts-silence-scale=1`).
+
+| Backend (same tokens) | warm synth | output audio | RTF | peak RSS |
+|---|---|---|---|---|
+| RapidSpeech ggml **CPU** | 87 ms | 2.40 s | 0.036 | **154 MB** |
+| RapidSpeech ggml **CUDA** | **26 ms** | 2.40 s | **0.011** | 579 MB |
+| sherpa-onnx **cuDNN-free CUDA** | 55 ms | 1.88 s | 0.029 | 667 MB |
+
+- For identical token input the **ggml CUDA path (26 ms) is ~2.1× faster** than sherpa-onnx's cuDNN-free
+  CUDA (55 ms), at **~1.2× lower RSS** (579 vs 667 MB). ggml CPU is leanest at **154 MB**. This *flips* the
+  small-model verdict (where sherpa-onnx/ORT wins): the deep 3-step-ODE CFM decoder favors ggml's
+  hand-written graph.
+- **Output-length caveat (honest):** the two runtimes disagree on synthesized length for the same tokens —
+  ggml's duration regulator matches host ONNX Runtime (~150 mel frames → 2.40 s); the deployment ORT 1.11
+  runtime sherpa links yields ~118 frames → 1.88 s. Both vocoders read `n_fft=512 hop=128`, so this is an
+  ORT-version / duration-regulator divergence, not a vocoder bug. Each RTF is vs its own output; the
+  directly-comparable figure is the **warm-synth wall-clock for identical input**.
+- ggml CUDA pays a one-time ~57 s sm_53→sm_121 PTX-JIT (cached in `CUDA_CACHE_PATH`), excluded from warm.
+
 ## Accuracy
 
 | Metric | Result |

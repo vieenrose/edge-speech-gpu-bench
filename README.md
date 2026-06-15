@@ -18,12 +18,21 @@ aarch64, sm_121, CUDA 13, 128 GB unified memory). Compares, on the same models a
 |---|---|---|---|---|---|
 | SenseVoice STT | 0.0102 | 0.079 † | 0.0739 | **0.0031** | 0.0031 |
 | melo8k TTS | 0.0209 | 0.028 † | 0.0657 | **0.0107** | 0.0245 |
+| **Matcha-TTS** ‡‡ | — | 0.029 ‡‡ | 0.036 | **0.011** | — |
 | silero-VAD | **0.0023** | — | 0.0055 | 0.0057 | 0.0413 |
 
 - **CPU:** sherpa-onnx wins (6–7× on STT/TTS).
 - **GPU (GB10-native columns):** RapidSpeech's ggml-CUDA flips both STT (0.0031) and TTS (0.0107)
   ahead of sherpa-CPU — but it's **launch-bound** (huge first-graph warmup), so it only pays off in a
   persistent process. See [`results/BENCHMARK.md`](results/BENCHMARK.md).
+- **Matcha-TTS is the first model where ggml-CUDA beats sherpa's *cuDNN-free CUDA* head-to-head**:
+  on the **exact same phoneme tokens**, warm synth is **ggml-CUDA 26 ms vs sherpa 55 ms (~2.1×)** at
+  lower RSS (579 vs 667 MB). The deep 3-step-ODE CFM decoder is where ggml's hand-written graph pulls
+  ahead of ORT. **‡‡** Both Matcha figures are measured *in the same Nano-toolchain container* on
+  identical tokens (so directly comparable to each other, unlike the † columns); the RTFs are each vs
+  that engine's own output length (the two runtimes disagree on synthesized length — see the
+  [same-utterance section](#head-to-head-cudnn-free-ort-vs-rapidspeech-both-on-the-nano-toolchain)
+  below). The directly-comparable figure is the warm-synth wall-clock.
 - **† sherpa CUDA (cuDNN-free)** is the *new* path this project enabled: sherpa-onnx running
   end-to-end on the **cuDNN-free onnxruntime 1.11 CUDA EP** (so the Nano can use the GPU without
   cuDNN's 782 MB). These two figures are measured in the **CUDA-10.2 container with sm_53 PTX-JIT**
@@ -93,7 +102,28 @@ forward); "raw ORT graph" = the bare ONNX forward (my `ort_bench`/`melo_synth`).
 |---|---|---|---|
 | SenseVoice | **756 MB** / 501 ms | 1227 MB / 443 ms | 1224 MB / 376 ms |
 | melo8k (*same* utterance) | **572 MB** / 268 ms | 736 MB / **55 ms** | 721 MB / 54 ms |
-| **Matcha-TTS** (zh-tw/en 8k) | **CPU 113 ms** / **CUDA 36 ms** ‡ | **681 MB / 139 ms** (3.96 s audio, RTF ~0.035) | — |
+| **Matcha-TTS** (zh-tw/en 8k) ‡ | **CPU 87 ms / CUDA 26 ms** (154 / 579 MB) | **667 MB / 55 ms** | — |
+
+**Matcha-TTS — same-utterance head-to-head.** The row above is now *apples-to-apples*: the **exact
+same phoneme tokens** are fed to both engines (sentence `這個星期的研究進度。` → sherpa's frontend emits
+`[2069, 614, 1886, 1397, 420, 1927, 829, 814, 489, 5]`, dumped via `--debug=1` and injected into the ggml
+harness so no text-frontend is needed there). Warm synth = best-of-3 in a persistent context (ggml) /
+sherpa's own per-call generation timer (model already loaded):
+
+| Backend (same tokens) | warm synth | output audio | RTF | peak RSS |
+|---|---|---|---|---|
+| RapidSpeech ggml **CPU** | 87 ms | 2.40 s | 0.036 | **154 MB** |
+| RapidSpeech ggml **CUDA** | **26 ms** | 2.40 s | **0.011** | 579 MB |
+| sherpa-onnx **cuDNN-free CUDA** | 55 ms | 1.88 s | 0.029 | 667 MB |
+
+For identical token input the **ggml CUDA path (26 ms) is ~2.1× faster than sherpa-onnx's cuDNN-free CUDA
+(55 ms)** and ~1.2× lighter (579 vs 667 MB); ggml CPU is the leanest at **154 MB**. Per audio-second the
+gap is wider still (ggml CUDA does ~28 % more frames). **One honest caveat:** the two runtimes disagree on
+the synthesized *length* for the same tokens — ggml's duration regulator matches host ONNX Runtime (~150
+mel frames → 2.40 s), whereas the deployment **ORT 1.11** runtime sherpa links yields ~118 frames → 1.88 s.
+This is an ORT-version / duration-regulator divergence (not a vocoder bug — both read `n_fft=512 hop=128`);
+each RTF above is therefore computed against that engine's own output, and the directly-comparable number
+is the **warm-synth wall-clock for identical input**.
 
 † **Matcha-TTS** ([Luigi/matcha-zh-tw-en-8k](https://huggingface.co/Luigi/matcha-zh-tw-en-8k), a code-mixed
 zh-TW/en 8 kHz CFM model): runs end-to-end on sherpa-onnx cuDNN-free CUDA — output matches the
@@ -117,19 +147,22 @@ and [vieenrose/RapidSpeech.cpp@`jetson-nano-gen1`](https://github.com/vieenrose/
    **400× faster (730 → 1.8 ms)**, **4.06× of the whole pipeline (971 → 239 ms)**, audio bit-identical.
 2. **Backend refactor (CUDA):** `PushText` was CPU-only (it used `ggml_graph_compute_with_ctx`). Rewriting
    it to the backend-agnostic `ggml_backend_sched` path made it **run on CUDA** (opt in `MATCHA_USE_CUDA=1`)
-   *and* **2× faster on CPU as a bonus** (dropped the 6 GB per-call context). Warm synth on the GB10:
-   **CPU 113 ms** (RTF 0.036, 493 MB) / **CUDA 36 ms** (RTF 0.011, + ~57 s one-time sm_53→sm_121 JIT).
-   Audio correct on both (CPU corr 0.99999, CUDA corr 0.996 vs the validated path).
+   *and* **2× faster on CPU as a bonus** (dropped the 6 GB per-call context). On the **same-utterance**
+   tokens (above), warm synth on the GB10 is **CPU 87 ms** (RTF 0.036, 154 MB) / **CUDA 26 ms** (RTF 0.011,
+   579 MB, + ~57 s one-time sm_53→sm_121 JIT cached in `CUDA_CACHE_PATH`). Audio matches the validated path
+   (CPU corr 0.99999, CUDA corr 0.996).
 
    On the gen1 the default stays CPU: ggml gates CUDA-graph replay on `cc ≥ 800` (Ampere) and the Nano is
-   sm_53, so a launch-bound CFM graph there can't amortize launches — whether CUDA beats the (now 113 ms)
+   sm_53, so a launch-bound CFM graph there can't amortize launches — whether CUDA beats the (now 87 ms)
    CPU path on real Maxwell is an open hardware question; on Ampere+ (Orin) cuda-graphs engage and CUDA
-   should win. (Backends aren't directly comparable: different sentences; sherpa-onnx is cuDNN-free CUDA.)
+   should win. On the GB10 with identical tokens, **ggml-CUDA (26 ms) already beats sherpa-onnx's
+   cuDNN-free CUDA (55 ms) ~2.1×** at lower RSS — see the same-utterance table above.
 
 - **RAM:** RapidSpeech is **~2× lighter** (ggml vs ORT's arena+framework overhead).
-- **Warm speed:** cuDNN-free **ORT/sherpa-onnx is faster on both** (melo8k ~5×) — the reverse of the RAM
-  picture. sherpa-onnx end-to-end ≈ the raw ORT forward + a small CPU frontend, confirming the pipeline
-  adds little over the graph.
+- **Warm speed:** on the small VITS/SenseVoice graphs cuDNN-free **ORT/sherpa-onnx is faster** (melo8k ~5×)
+  — sherpa-onnx end-to-end ≈ the raw ORT forward + a small CPU frontend, so the pipeline adds little over
+  the graph. **Matcha-TTS flips this**: on identical tokens **ggml-CUDA (26 ms) beats sherpa cuDNN-free
+  CUDA (55 ms) ~2.1×** — the deep 3-step-ODE CFM decoder is where ggml's hand-written graph pulls ahead.
 - **Correctness:** sherpa-onnx transcribes zh.wav correctly and its melo8k TTS **round-trips back to the
   input sentence** ("人工智能正在改变世界"); the raw melo8k run is also verified bit-fair (identical
   17664-sample output, cuDNN-free **GPU == CPU corr 1.000000**).
