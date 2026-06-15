@@ -17,9 +17,13 @@ inference compiles the GPU graph/pipeline (CUDA ~0.2 s, Vulkan up to ~1.7 s for 
 calls are 6–250× faster. A per-process CLI re-pays that every call. GPU memory: `N/A` (GB10 UMA;
 `nvidia-smi` reports N/A).
 
-## RTF — warm steady-state (lower is better)
+## RTF — warm steady-state (lower is better) — **all measured on GB10**
 
-| Model (task) | sherpa-onnx CPU | RapidSpeech CPU | RapidSpeech CUDA | RapidSpeech Vulkan |
+> Every RTF in this table (and the two below) is from the **GB10** (sm_121 native for CPU/Vulkan;
+> sm_53 SASS PTX-JIT'd for the CUDA columns). For **real Jetson Nano gen1** numbers see the
+> [Real Jetson Nano gen1 section](#real-jetson-nano-gen1-sm_53-maxwell--the-device-not-the-gb10-proxy-2026-06-15) below.
+
+| Model (task, all **GB10**) | sherpa-onnx CPU | RapidSpeech CPU | RapidSpeech CUDA | RapidSpeech Vulkan |
 |---|---|---|---|---|
 | **SenseVoice** STT | **0.0102** | 0.0739 | **0.0031** | **0.0031** |
 | **X-ASR-480ms** STT | 0.0666 | — | — | — |
@@ -50,7 +54,10 @@ ggml e2e harness (`MATCHA_IDS=…`) so it synthesizes the exact same tokens. War
 ggml context / sherpa's per-call generation timer (model already loaded). sherpa on the cuDNN-free ORT 1.11
 CUDA EP (`--provider=cuda`, `GraphOptimizationLevel=1`, `--tts-silence-scale=1`).
 
-| Backend (same tokens) | warm synth | output audio | RTF | peak RSS |
+> ⚠️ The synth-time (ms) and peak-RSS (MB) below are **GB10** (sm_53 SASS PTX-JIT'd onto Blackwell),
+> not real Nano. Real-device equivalents are in the Nano section at the bottom of this file.
+
+| Backend (same tokens, all **GB10**) | warm synth | output audio | RTF | peak RSS |
 |---|---|---|---|---|
 | RapidSpeech ggml **CPU** | 87 ms | 2.40 s | 0.036 | **154 MB** |
 | RapidSpeech ggml **CUDA** | **26 ms** | 2.40 s | **0.011** | 579 MB |

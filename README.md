@@ -17,9 +17,14 @@ aarch64, sm_121, CUDA 13, 128 GB unified memory). Compares, on the same models a
 > beats sherpa-onnx CPU** — though ggml-CUDA's *RAM* win is real (it fits where ORT-CUDA OOMs). See
 > [Real Jetson Nano gen1 measurements](#-real-jetson-nano-gen1--the-device-measurements-2026-06-15).
 
-## Headline results (warm RTF, lower is better)
+## Headline results — **measured on GB10** (warm RTF, lower is better)
 
-| Model | sherpa CPU | sherpa CUDA (cuDNN-free)† | RapidSpeech CPU | RapidSpeech CUDA | RapidSpeech Vulkan |
+> ⚠️ **Every number in this table is from the GB10**, not the Nano. CPU/Vulkan columns are GB10-native
+> (sm_121); the CUDA columns are GB10 with **sm_53 SASS PTX-JIT'd** (the "Nano toolchain" container).
+> For the **real Jetson Nano gen1 hardware** numbers (where the GPU verdict flips), see
+> [Real Jetson Nano gen1 measurements](#-real-jetson-nano-gen1--the-device-measurements-2026-06-15).
+
+| Model (all **GB10**) | sherpa CPU | sherpa CUDA (cuDNN-free)† | RapidSpeech CPU | RapidSpeech CUDA | RapidSpeech Vulkan |
 |---|---|---|---|---|---|
 | SenseVoice STT | 0.0102 | 0.079 † | 0.0739 | **0.0031** | 0.0031 |
 | melo8k TTS | 0.0209 | 0.028 † | 0.0657 | **0.0107** | 0.0245 |
@@ -57,7 +62,10 @@ verdict flips — on the real Maxwell, no GPU path beats CPU.**
 
 ### Measured on real Nano gen1 (single-shot / per-call, the deployment pattern)
 
-| Model | sherpa-onnx **CPU** | sherpa cuDNN-free **CUDA** | RapidSpeech **ggml-CPU** | RapidSpeech **ggml-CUDA** |
+> Every RTF and every RSS (MB) in the three tables of this section is measured on **real Jetson Nano
+> gen1 hardware** (sm_53 Maxwell, CUDA 10.2, 4 GB) — *not* the GB10.
+
+| Model (RTF + RSS all **real Nano**) | sherpa-onnx **CPU** | sherpa cuDNN-free **CUDA** | RapidSpeech **ggml-CPU** | RapidSpeech **ggml-CUDA** |
 |---|---|---|---|---|
 | **melo8k** TTS (RTF) | **0.457** (305 MB) | 0.701 (591 MB) — *slower* | 3.60 *(launch-bound)* | 0.9–1.2, **fits @ 455 MB** |
 | **matcha8k** TTS (RTF) | **0.347** @t4 (210 MB) | 0.502 — *slower* | — | — |
@@ -148,12 +156,17 @@ ORT-1.11 API + a build recipe): **[vieenrose/sherpa-onnx@`cudnn-free-ort-1.11-je
 Run with `--provider=cuda:cfg.txt` where `cfg.txt` has `GraphOptimizationLevel=1` (disables the
 cuDNN-only FusedConv).
 
-### Head-to-head: cuDNN-free ORT vs RapidSpeech (both on the Nano toolchain)
-Both engines cuDNN-free, in the CUDA-10.2 container with sm_53 dispatch. Warm = model-load **and**
-one-time PTX-JIT excluded; inputs matched. "sherpa-onnx" = the full pipeline (frontend + ORT GPU
+### Head-to-head: cuDNN-free ORT vs RapidSpeech (both in the Nano-toolchain container) — **measured on GB10**
+> ⚠️ **Both tables below are GB10 numbers** (CUDA-10.2 container, sm_53 SASS PTX-JIT'd onto the GB10's
+> Blackwell GPU) — *not* real Nano hardware. The "Nano toolchain" = the CUDA-10.2/sm_53 build env, run
+> here on the GB10. RSS in MB and times in ms are all GB10. For real Nano numbers see the
+> [device section](#-real-jetson-nano-gen1--the-device-measurements-2026-06-15).
+
+Both engines cuDNN-free, in the CUDA-10.2 container with sm_53 dispatch (on GB10). Warm = model-load
+**and** one-time PTX-JIT excluded; inputs matched. "sherpa-onnx" = the full pipeline (frontend + ORT GPU
 forward); "raw ORT graph" = the bare ONNX forward (my `ort_bench`/`melo_synth`).
 
-| Model | RapidSpeech (ggml) | sherpa-onnx end-to-end (cuDNN-free ORT) | raw ORT graph |
+| Model (RSS/ms all **GB10**) | RapidSpeech (ggml) | sherpa-onnx end-to-end (cuDNN-free ORT) | raw ORT graph |
 |---|---|---|---|
 | SenseVoice | **756 MB** / 501 ms | 1227 MB / 443 ms | 1224 MB / 376 ms |
 | melo8k (*same* utterance) | **572 MB** / 268 ms | 736 MB / **55 ms** | 721 MB / 54 ms |
@@ -165,7 +178,7 @@ same phoneme tokens** are fed to both engines (sentence `這個星期的研究�
 harness so no text-frontend is needed there). Warm synth = best-of-3 in a persistent context (ggml) /
 sherpa's own per-call generation timer (model already loaded):
 
-| Backend (same tokens) | warm synth | output audio | RTF | peak RSS |
+| Backend (same tokens, all **GB10**) | warm synth | output audio | RTF | peak RSS |
 |---|---|---|---|---|
 | RapidSpeech ggml **CPU** | 87 ms | 2.40 s | 0.036 | **154 MB** |
 | RapidSpeech ggml **CUDA** | **26 ms** | 2.40 s | **0.011** | 579 MB |
@@ -200,9 +213,9 @@ spec-extraction-and-adversarial-verify workflow then staged ggml validators; see
 and [vieenrose/RapidSpeech.cpp@`jetson-nano-gen1`](https://github.com/vieenrose/RapidSpeech.cpp/tree/jetson-nano-gen1)
 (`arch/matcha.cpp`).
 
-**Then auto-optimized + made CUDA-capable.** Two passes:
+**Then auto-optimized + made CUDA-capable** (all timings in this paragraph measured on **GB10**). Two passes:
 1. **Profiling-driven (CPU):** the iSTFT was 75 % of runtime as a naive O(N²) DFT; a radix-2 FFT made it
-   **400× faster (730 → 1.8 ms)**, **4.06× of the whole pipeline (971 → 239 ms)**, audio bit-identical.
+   **400× faster (730 → 1.8 ms, GB10)**, **4.06× of the whole pipeline (971 → 239 ms, GB10)**, audio bit-identical.
 2. **Backend refactor (CUDA):** `PushText` was CPU-only (it used `ggml_graph_compute_with_ctx`). Rewriting
    it to the backend-agnostic `ggml_backend_sched` path made it **run on CUDA** (opt in `MATCHA_USE_CUDA=1`)
    *and* **2× faster on CPU as a bonus** (dropped the 6 GB per-call context). On the **same-utterance**
